@@ -189,6 +189,31 @@ export function MessagesView() {
     return () => clearInterval(interval);
   }, []);
 
+  // Handle real-time conversation updates
+  useEffect(() => {
+    console.log('📞 Conversations updated in MessagesView:', {
+      count: conversations.length,
+      selectedConversation,
+      topConversations: conversations.slice(0, 3).map(c => ({
+        id: c.id,
+        lastMessageContent: c.lastMessage?.content?.substring(0, 30),
+        updatedAt: c.updatedAt,
+        participants: c.participants
+      }))
+    });
+    
+    // If we have a selected conversation and it was updated, scroll to bottom
+    if (selectedConversation && conversations.length > 0) {
+      const currentConversation = conversations.find(c => c.id === selectedConversation);
+      if (currentConversation?.lastMessage) {
+        // Small delay to ensure the new message is rendered
+        setTimeout(() => {
+          scrollToBottom(false);
+        }, 100);
+      }
+    }
+  }, [conversations, selectedConversation]);
+
   // Debug logging for conversations
   useEffect(() => {
     console.log('📞 MessagesView Debug:', {
@@ -321,6 +346,14 @@ export function MessagesView() {
       status: 'sending'
     };
 
+    console.log('📤 Sending message:', {
+      content: tempMessage.content.substring(0, 50),
+      senderId: tempMessage.senderId,
+      receiverId: tempMessage.receiverId,
+      selectedConversation,
+      conversationsCount: conversations.length
+    });
+
     // Add to pending messages immediately
     setPendingMessages(prev => [...prev, tempMessage]);
     setMessageText('');
@@ -333,33 +366,28 @@ export function MessagesView() {
 
     setLoading(true);
     try {
-      const sentMessage = await sendMessage({
+      await sendMessage({
         senderId: state.currentUser!.id,
         receiverId: selectedConversationUser.id,
         content: tempMessage.content
       });
       
+      console.log('✅ Message sent successfully, removing from pending');
+      
       // Remove pending message immediately once sent successfully
       setPendingMessages(prev => prev.filter(msg => msg.id !== tempMessage.id));
 
-      // Update paginated messages for the current conversation
-      if (selectedConversation) {
-        setPaginatedMessages(prev => ({
-          ...prev,
-          [selectedConversation]: [
-            ...(prev[selectedConversation] || []),
-            sentMessage
-          ].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-        }));
-      }
-
-      // Scroll to bottom to show new message
+      // Log conversation state after sending
       setTimeout(() => {
-        scrollToBottom(true);
+        console.log('📞 Conversations after message sent:', {
+          count: conversations.length,
+          selectedConversation,
+          selectedConversationData: conversations.find(c => c.id === selectedConversation)
+        });
       }, 100);
 
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('❌ Error sending message:', error);
       // Mark as failed
       setPendingMessages(prev => 
         prev.map(msg => 
