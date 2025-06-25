@@ -133,8 +133,8 @@ async function updateNgrokUrl() {
 
 async function main() {
   try {
-    log('🚀 GitHub Publish - Automated Deployment', colors.blue);
-    log('=========================================', colors.blue);
+    log('🚀 Drivora GitHub Publish - Automated Deployment', colors.blue);
+    log('===============================================', colors.blue);
     
     // Check if we're in a git repository
     const hasChanges = await checkGitStatus();
@@ -182,7 +182,7 @@ async function main() {
         
         // Try to get username for GitHub Pages URL
         const username = repoPath.split('/')[0];
-        log(`🌍 Live Site: https://${username}.github.io/car-app`, colors.green);
+        log(`🌍 Live Site: https://${username}.github.io/drivora`, colors.green);
       }
     } catch (error) {
       // Ignore error, just won't show URLs

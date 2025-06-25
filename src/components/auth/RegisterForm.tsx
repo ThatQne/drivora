@@ -99,7 +99,7 @@ export function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
           >
             <UserPlus className="w-10 h-10 text-white" />
           </motion.div>
-          <h1 className="text-3xl font-bold text-secondary-800 mb-2">Join CarTrade</h1>
+                        <h1 className="text-3xl font-bold text-secondary-800 mb-2">Join Drivora</h1>
           <p className="text-secondary-600">Create your account to start trading</p>
         </div>
 

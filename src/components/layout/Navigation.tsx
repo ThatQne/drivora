@@ -169,7 +169,7 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
                 <Car className="w-6 h-6 text-primary-900" />
               </div>
               <div>
-                <h2 className="font-bold text-xl text-primary-100">CarTrade</h2>
+                <h2 className="font-bold text-xl text-primary-100">Drivora</h2>
                 <p className="text-sm text-primary-300">Vehicle Trading</p>
               </div>
             </div>
@@ -340,7 +340,7 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
                   transition={{ duration: 0.15, ease: "easeOut" }}
                   className="whitespace-nowrap"
                 >
-                  <h2 className="font-bold text-xl text-primary-100">CarTrade</h2>
+                  <h2 className="font-bold text-xl text-primary-100">Drivora</h2>
                   <p className="text-sm text-primary-300">Vehicle Trading</p>
                 </motion.div>
               </div>

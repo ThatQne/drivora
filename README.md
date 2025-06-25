@@ -1,4 +1,4 @@
-# CarTrade - Vehicle Trading Platform
+# Drivora - Vehicle Trading Platform
 
 A modern, minimalist web application for buying, selling, and trading vehicles. Built with React, TypeScript, and Tailwind CSS.
 
@@ -139,6 +139,6 @@ This project follows modern React development patterns and is open for contribut
 
 ---
 
-**CarTrade** - Making vehicle trading simple, secure, and social. 
+**Drivora** - Making vehicle trading simple, secure, and social. 
  
  

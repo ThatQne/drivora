@@ -277,8 +277,8 @@ async function updateEnvironmentVariables(ngrokUrl) {
 
 async function main() {
   try {
-    log('🚀 Backend Startup - Automated Setup', colors.blue);
-    log('====================================', colors.blue);
+    log('🚀 Drivora Backend Startup - Automated Setup', colors.blue);
+    log('===========================================', colors.blue);
     
     // Check prerequisites
     log('\n🔍 Checking prerequisites...', colors.blue);

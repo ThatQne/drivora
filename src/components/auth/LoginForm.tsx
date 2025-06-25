@@ -51,7 +51,7 @@ export function LoginForm({ onSwitchToRegister }: LoginFormProps) {
             <User className="w-10 h-10 text-white" />
           </motion.div>
           <h1 className="text-3xl font-bold text-secondary-800 mb-2">Welcome Back</h1>
-          <p className="text-secondary-600">Sign in to your CarTrade account</p>
+                        <p className="text-secondary-600">Sign in to your Drivora account</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">

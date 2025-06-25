@@ -193,7 +193,7 @@ export function SmartAuthForm() {
               <Car style={{ width: '2.5rem', height: '2.5rem', color: 'var(--color-bg-primary)' }} />
             </motion.div>
             <h1 style={{ fontSize: '1.875rem', fontWeight: 'bold', color: 'var(--color-text-primary)', marginBottom: '0.5rem' }}>
-              CarTrade
+                                Drivora
             </h1>
             <p style={{ color: 'var(--color-text-secondary)' }}>Enter your credentials to continue</p>
           </div>
