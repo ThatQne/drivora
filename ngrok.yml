@@ -1,9 +1,0 @@
-version: "2"
-tunnels:
-  backend:
-    proto: http
-    addr: 5000
-    request_header:
-      add:
-        - "ngrok-skip-browser-warning: true"
-    host_header: localhost:5000 

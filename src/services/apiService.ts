@@ -1,6 +1,6 @@
 import { User, Vehicle, Listing, Review, Trade, Message, Conversation } from '../types/index.ts';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL ? `${process.env.REACT_APP_API_URL}/api` : 'http://localhost:5000/api';
 
 class ApiService {
   private static getAuthToken(): string | null {
