@@ -67,6 +67,50 @@ async function checkBackendDependencies() {
   return true;
 }
 
+async function checkEnvironmentFiles() {
+  const backendEnvPath = path.join(process.cwd(), 'backend', '.env');
+  const frontendEnvPath = path.join(process.cwd(), '.env');
+  
+  // Check backend .env
+  if (!fs.existsSync(backendEnvPath)) {
+    log('⚠️  Backend .env file not found', colors.yellow);
+    log('   Creating from template...', colors.blue);
+    
+    const examplePath = path.join(process.cwd(), 'backend', '.env.example');
+    if (fs.existsSync(examplePath)) {
+      const exampleContent = fs.readFileSync(examplePath, 'utf8');
+      // Create with safe defaults
+      const safeContent = exampleContent
+        .replace('MONGODB_URI=mongodb://localhost:27017/drivora', 'MONGODB_URI=mongodb://localhost:27017/drivora')
+        .replace('JWT_SECRET=your_super_secret_jwt_key_here_change_this_in_production_make_it_long_and_random', 
+                `JWT_SECRET=${generateRandomSecret()}`);
+      
+      fs.writeFileSync(backendEnvPath, safeContent);
+      log('✅ Backend .env created with safe defaults', colors.green);
+      log('⚠️  Please update MONGODB_URI and other credentials as needed', colors.yellow);
+    } else {
+      log('❌ Backend .env.example not found', colors.red);
+      return false;
+    }
+  }
+  
+  // Check frontend .env (optional for local development)
+  if (!fs.existsSync(frontendEnvPath)) {
+    log('ℹ️  Frontend .env not found (will use defaults)', colors.blue);
+  }
+  
+  return true;
+}
+
+function generateRandomSecret() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+  let result = '';
+  for (let i = 0; i < 64; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
 async function killExistingProcesses() {
   try {
     // Kill existing backend processes on port 5000
@@ -291,6 +335,13 @@ async function main() {
     log('\n📦 Checking backend dependencies...', colors.blue);
     const depsOk = await checkBackendDependencies();
     if (!depsOk) {
+      process.exit(1);
+    }
+    
+    // Check environment files
+    log('\n🔧 Checking environment configuration...', colors.blue);
+    const envOk = await checkEnvironmentFiles();
+    if (!envOk) {
       process.exit(1);
     }
     
