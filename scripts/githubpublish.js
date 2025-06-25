@@ -136,17 +136,51 @@ async function main() {
     log('🚀 Drivora GitHub Publish - Automated Deployment', colors.blue);
     log('===============================================', colors.blue);
     
+    // Always update ngrok URL first, regardless of git status
+    log('\n📡 Updating API URL...', colors.blue);
+    const ngrokUpdated = await updateNgrokUrl();
+    
     // Check if we're in a git repository
     const hasChanges = await checkGitStatus();
     if (!hasChanges) {
-      log('ℹ️  No changes detected', colors.yellow);
-      log('   Nothing to commit and publish', colors.yellow);
+      log('\nℹ️  No code changes detected', colors.yellow);
+      if (ngrokUpdated) {
+        log('✅ Ngrok URL updated in GitHub secrets', colors.green);
+        log('🚀 Creating deployment to update live site with new URL...', colors.blue);
+        
+        // Create empty commit to trigger deployment
+        await execPromise('git commit --allow-empty -m "Update ngrok URL for backend connection"');
+        log('✅ Empty commit created', colors.green);
+        
+        // Push to trigger deployment
+        await execPromise('git push origin main');
+        log('✅ Pushed to GitHub - deployment triggered', colors.green);
+        
+        // Get repository info for URL
+        try {
+          const remoteUrl = await execPromise('git config --get remote.origin.url');
+          const repoMatch = remoteUrl.match(/github\.com[:/](.+?)(?:\.git)?$/);
+          if (repoMatch) {
+            const repoPath = repoMatch[1];
+            log(`\n🌐 GitHub Repository: https://github.com/${repoPath}`, colors.blue);
+            log(`📊 Actions: https://github.com/${repoPath}/actions`, colors.blue);
+            
+            // Try to get username for GitHub Pages URL
+            const username = repoPath.split('/')[0];
+            log(`🌍 Live Site: https://${username}.github.io/drivora`, colors.green);
+          }
+        } catch (error) {
+          // Ignore error, just won't show URLs
+        }
+        
+        log('\n✨ Deployment initiated!', colors.green);
+        log('⏱️  GitHub Pages will update in 2-5 minutes', colors.yellow);
+        log('📱 Check GitHub Actions for build status', colors.blue);
+      } else {
+        log('   Nothing to commit and publish', colors.yellow);
+      }
       return;
     }
-    
-    // Update ngrok URL in GitHub secrets
-    log('\n📡 Updating API URL...', colors.blue);
-    await updateNgrokUrl();
     
     // Get current branch
     const branch = await getCurrentBranch();
