@@ -35,7 +35,7 @@ interface AppContextType {
   getListingsCount: () => Promise<number>;
   addReview: (review: Omit<Review, 'id' | 'createdAt'>) => Promise<void>;
   getUserProfile: (userId: string) => User | null;
-  sendMessage: (message: Omit<Message, 'id' | 'timestamp' | 'read'>) => Promise<void>;
+  sendMessage: (message: Omit<Message, 'id' | 'timestamp' | 'read'>) => Promise<Message>;
   markMessagesAsRead: (conversationId: string) => Promise<void>;
   addTrade: (trade: Omit<Trade, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;
   updateTrade: (tradeOrId: Trade | string, tradeData?: Partial<Trade>) => Promise<void>;
@@ -154,7 +154,24 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_MESSAGES':
       return { ...state, messages: action.payload };
     case 'ADD_MESSAGE':
-      return { ...state, messages: [...state.messages, action.payload] };
+      const newState = { ...state, messages: [...state.messages, action.payload] };
+      
+      // Update the conversation's last message
+      if (state.conversations.length > 0) {
+        const conversationId = [action.payload.senderId, action.payload.receiverId].sort().join('-');
+        newState.conversations = state.conversations.map(conv => {
+          if (conv.id === conversationId) {
+            return {
+              ...conv,
+              lastMessage: action.payload,
+              updatedAt: action.payload.timestamp
+            };
+          }
+          return conv;
+        });
+      }
+      
+      return newState;
     case 'SET_CONVERSATIONS':
       console.log('📞 Setting conversations in state:', action.payload.length, 'conversations');
       console.log('📞 Sample conversations:', action.payload.slice(0, 2).map(c => ({
@@ -853,40 +870,25 @@ export function AppProvider({ children }: AppProviderProps) {
 
   const sendMessage = async (messageData: Omit<Message, 'id' | 'timestamp' | 'read'>) => {
     try {
-      const newMessage = await ApiService.sendMessage(messageData);
+      dispatch({ type: 'SET_LOADING', payload: true });
+      const response = await ApiService.sendMessage(messageData);
       
-      // Immediately add the message to state
-      dispatch({ type: 'ADD_MESSAGE', payload: newMessage });
+      // Add the message to state
+      dispatch({ type: 'ADD_MESSAGE', payload: response });
       
-      // Ensure both sender and receiver users are loaded
-      const userIdsToLoad = [messageData.senderId, messageData.receiverId].filter(id => 
-        id && !state.users.find(u => u.id === id)
-      );
-      
-      if (userIdsToLoad.length > 0) {
-        try {
-          const users = await ApiService.getUsersBatch(userIdsToLoad);
-          const usersWithId = users.map((u: any) => ({ 
-            ...u, 
-            id: u._id || u.id 
-          }));
-          
-          // Add new users to existing users
-          const allUsers = [...state.users];
-          usersWithId.forEach(user => {
-            if (!allUsers.find(u => u.id === user.id)) {
-              allUsers.push(user);
-            }
-          });
-          
-          dispatch({ type: 'SET_USERS', payload: allUsers });
-        } catch (error) {
-          console.error('Error loading users for message:', error);
-        }
+      // If conversations haven't been loaded yet, load them
+      if (state.conversations.length === 0) {
+        const conversations = await ApiService.getConversations();
+        dispatch({ type: 'SET_CONVERSATIONS', payload: conversations });
       }
       
+      return response;
     } catch (error) {
       console.error('Error sending message:', error);
+      dispatch({ type: 'SET_ERROR', payload: 'Failed to send message' });
+      throw error;
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 

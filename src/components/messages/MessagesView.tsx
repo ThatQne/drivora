@@ -63,41 +63,6 @@ export function MessagesView() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastScrollHeight = useRef<number>(0);
 
-  // Track when messages/conversations are loaded for the first time
-  useEffect(() => {
-    if ((state.messages && state.messages.length > 0) || (state.conversations && state.conversations.length > 0)) {
-      setInitialLoad(false);
-    }
-  }, [state.messages, state.conversations]);
-
-  // Clean up typing indicators that are too old
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = Date.now();
-      setTypingUsers(prev => prev.filter(typing => now - typing.timestamp < 3000));
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  // Debug logging for conversations
-  useEffect(() => {
-    console.log('📞 MessagesView Debug:', {
-      conversationsCount: state.conversations?.length || 0,
-      messagesCount: state.messages?.length || 0,
-      usersCount: state.users?.length || 0,
-      conversations: state.conversations?.slice(0, 3).map(c => ({
-        id: c.id,
-        participants: c.participants,
-        otherUser: (c as any).otherUser ? {
-          id: (c as any).otherUser.id,
-          username: (c as any).otherUser.username
-        } : null,
-        lastMessage: c.lastMessage?.content?.substring(0, 30)
-      }))
-    });
-  }, [state.conversations, state.messages, state.users]);
-
   // Use conversations from state (loaded from API) with fallback to creating from messages
   const conversations = useMemo(() => {
     // If we have conversations from the API, use those
@@ -112,6 +77,8 @@ export function MessagesView() {
     // Fallback: Create conversations from messages if API conversations aren't available
     console.log('📞 Fallback: Creating conversations from messages');
     const convMap = new Map<string, Conversation>();
+    
+    if (!state.messages) return [];
     
     state.messages.forEach(message => {
       const otherUserId = message.senderId === state.currentUser?.id 
@@ -151,6 +118,94 @@ export function MessagesView() {
       new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     );
   }, [state.conversations, state.messages, state.currentUser?.id, state.users]);
+
+  // Track when messages/conversations are loaded for the first time
+  useEffect(() => {
+    if ((state.messages && state.messages.length > 0) || (state.conversations && state.conversations.length > 0)) {
+      setInitialLoad(false);
+    }
+  }, [state.messages, state.conversations]);
+
+  // Sync new messages from global state into paginated messages
+  useEffect(() => {
+    if (!selectedConversation || !state.messages) return;
+
+    // Get the conversation to find the other user
+    const conversation = conversations.find(c => c.id === selectedConversation);
+    if (!conversation) return;
+
+    let otherUserId: string;
+    if ((conversation as any).otherUser) {
+      otherUserId = (conversation as any).otherUser.id;
+    } else {
+      otherUserId = conversation.participants.find(p => p !== state.currentUser?.id) || '';
+    }
+
+    // Filter messages for this conversation from global state
+    const conversationMessages = state.messages.filter(msg => {
+      const msgSenderId = typeof msg.senderId === 'object' ? (msg.senderId as any).id : msg.senderId;
+      const msgReceiverId = typeof msg.receiverId === 'object' ? (msg.receiverId as any).id : msg.receiverId;
+      
+      return (msgSenderId === state.currentUser?.id && msgReceiverId === otherUserId) ||
+             (msgSenderId === otherUserId && msgReceiverId === state.currentUser?.id);
+    });
+
+    // Get current paginated messages for this conversation
+    const currentPaginatedMessages = paginatedMessages[selectedConversation] || [];
+
+    // Find new messages that aren't in paginated messages yet
+    const newMessages = conversationMessages.filter(globalMsg => {
+      return !currentPaginatedMessages.some(paginatedMsg => 
+        paginatedMsg.id === globalMsg.id
+      );
+    });
+
+    // If there are new messages, add them to paginated messages
+    if (newMessages.length > 0) {
+      console.log(`📨 Adding ${newMessages.length} new messages to paginated messages for conversation ${selectedConversation}`);
+      
+      setPaginatedMessages(prev => ({
+        ...prev,
+        [selectedConversation]: [
+          ...currentPaginatedMessages,
+          ...newMessages
+        ].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+      }));
+
+      // Scroll to bottom to show new message
+      setTimeout(() => {
+        scrollToBottom(true);
+      }, 100);
+    }
+  }, [state.messages, selectedConversation, conversations, state.currentUser?.id, paginatedMessages]);
+
+  // Clean up typing indicators that are too old
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      setTypingUsers(prev => prev.filter(typing => now - typing.timestamp < 3000));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Debug logging for conversations
+  useEffect(() => {
+    console.log('📞 MessagesView Debug:', {
+      conversationsCount: state.conversations?.length || 0,
+      messagesCount: state.messages?.length || 0,
+      usersCount: state.users?.length || 0,
+      conversations: state.conversations?.slice(0, 3).map(c => ({
+        id: c.id,
+        participants: c.participants,
+        otherUser: (c as any).otherUser ? {
+          id: (c as any).otherUser.id,
+          username: (c as any).otherUser.username
+        } : null,
+        lastMessage: c.lastMessage?.content?.substring(0, 30)
+      }))
+    });
+  }, [state.conversations, state.messages, state.users]);
 
   // Filter conversations based on search
   const filteredConversations = useMemo(() => {
@@ -278,15 +333,30 @@ export function MessagesView() {
 
     setLoading(true);
     try {
-      await sendMessage({
+      const sentMessage = await sendMessage({
         senderId: state.currentUser!.id,
         receiverId: selectedConversationUser.id,
         content: tempMessage.content
       });
       
       // Remove pending message immediately once sent successfully
-      // The real message will appear through state.messages and our filter will prevent duplicates
       setPendingMessages(prev => prev.filter(msg => msg.id !== tempMessage.id));
+
+      // Update paginated messages for the current conversation
+      if (selectedConversation) {
+        setPaginatedMessages(prev => ({
+          ...prev,
+          [selectedConversation]: [
+            ...(prev[selectedConversation] || []),
+            sentMessage
+          ].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+        }));
+      }
+
+      // Scroll to bottom to show new message
+      setTimeout(() => {
+        scrollToBottom(true);
+      }, 100);
 
     } catch (error) {
       console.error('Error sending message:', error);
