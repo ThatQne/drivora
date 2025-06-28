@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useEffect, ReactNode, useState, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, ReactNode, useState, useMemo, useCallback, useRef } from 'react';
 import { AppState, User, Vehicle, Listing, Auction, Trade, Message, Conversation, Review, NavigationTab } from '../types/index.ts';
 import { AuthService } from '../services/authService.ts';
 import { DataService } from '../services/dataService.ts';
@@ -337,21 +337,16 @@ export function AppProvider({ children }: AppProviderProps) {
   }>({ data: [], timestamp: 0, ttl: 30000 }); // 30 second cache
   
   // Add loading states to prevent duplicate calls
-  const [loadingStates, setLoadingStates] = useState<{
-    userData: boolean;
-    users: boolean;
-    listings: boolean;
-    garage: boolean;
-    trades: boolean;
-    messages: boolean;
-  }>({
+  const [loadingStates, setLoadingStates] = useState({
     userData: false,
-    users: false,
-    listings: false,
-    garage: false,
-    trades: false,
+    allListings: false,
+    allUsers: false,
     messages: false
   });
+
+  // Use a ref to store current state for WebSocket callbacks to avoid stale closures
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   // 🔗 WEBSOCKET INTEGRATION: Setup real-time updates
   useEffect(() => {
@@ -368,17 +363,15 @@ export function AppProvider({ children }: AppProviderProps) {
             console.log('📋 Real-time: New listing added:', listing.title);
             const listingWithId = { ...listing, id: listing._id || listing.id };
             
-            // Add to all listings if we have them loaded
-            if (state.allListings.length > 0) {
-              dispatch({ type: 'SET_ALL_LISTINGS', payload: [...state.allListings, listingWithId] });
-            }
+            // Always add to all listings, even if empty - use stateRef to get current state
+            dispatch({ type: 'SET_ALL_LISTINGS', payload: [...stateRef.current.allListings, listingWithId] });
 
             // Add to user's own listings if it's theirs
-            if (listing.sellerId === state.currentUser?.id) {
+            if (listing.sellerId === stateRef.current.currentUser?.id) {
               dispatch({ type: 'ADD_LISTING', payload: listingWithId });
               
               // Update vehicle status to mark as listed
-              const vehicle = state.vehicles.find(v => v.id === listing.vehicleId);
+              const vehicle = stateRef.current.vehicles.find(v => v.id === listing.vehicleId);
               if (vehicle) {
                 const updatedVehicle: Vehicle = {
                   ...vehicle,
@@ -396,16 +389,14 @@ export function AppProvider({ children }: AppProviderProps) {
             console.log('📋 Real-time: Listing updated:', listing.title);
             const listingWithId = { ...listing, id: listing._id || listing.id };
             
-            // Update in all listings
-            if (state.allListings.length > 0) {
-              const updatedAllListings = state.allListings.map(l => 
-                l.id === listingWithId.id ? listingWithId : l
-              );
-              dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
-            }
+            // Update in all listings - use stateRef to get current state
+            const updatedAllListings = stateRef.current.allListings.map(l => 
+              l.id === listingWithId.id ? listingWithId : l
+            );
+            dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
 
             // Update in user's own listings if it's theirs
-            if (listing.sellerId === state.currentUser?.id) {
+            if (listing.sellerId === stateRef.current.currentUser?.id) {
               dispatch({ type: 'UPDATE_LISTING', payload: listingWithId });
             }
           },
@@ -413,11 +404,9 @@ export function AppProvider({ children }: AppProviderProps) {
           onListingDeleted: (listingId) => {
             console.log('📋 Real-time: Listing deleted:', listingId);
             
-            // Remove from all listings
-            if (state.allListings.length > 0) {
-              const updatedAllListings = state.allListings.filter(l => l.id !== listingId);
-              dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
-            }
+            // Remove from all listings - use stateRef to get current state
+            const updatedAllListings = stateRef.current.allListings.filter(l => l.id !== listingId);
+            dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
 
             // Remove from user's own listings
             dispatch({ type: 'DELETE_LISTING', payload: listingId });
@@ -813,12 +802,12 @@ export function AppProvider({ children }: AppProviderProps) {
 
   const loadAllUsers = async () => {
     // Prevent duplicate calls
-    if (loadingStates.users) {
+    if (loadingStates.allUsers) {
       console.log('⏳ Users already loading, skipping duplicate call');
       return;
     }
 
-    setLoadingStates(prev => ({ ...prev, users: true }));
+    setLoadingStates(prev => ({ ...prev, allUsers: true }));
     
     try {
       const users = await ApiService.getAllUsers();
@@ -832,7 +821,7 @@ export function AppProvider({ children }: AppProviderProps) {
       // Fallback to empty array if API fails
       dispatch({ type: 'SET_USERS', payload: [] });
     } finally {
-      setLoadingStates(prev => ({ ...prev, users: false }));
+      setLoadingStates(prev => ({ ...prev, allUsers: false }));
     }
   };
 
@@ -845,11 +834,11 @@ export function AppProvider({ children }: AppProviderProps) {
     }
 
     // Prevent duplicate calls
-    if (loadingStates.users) {
+    if (loadingStates.allUsers) {
       return;
     }
 
-    setLoadingStates(prev => ({ ...prev, users: true }));
+    setLoadingStates(prev => ({ ...prev, allUsers: true }));
 
     try {
       // Use efficient batch endpoint for specific users
@@ -869,18 +858,18 @@ export function AppProvider({ children }: AppProviderProps) {
         await loadAllUsers();
       }
     } finally {
-      setLoadingStates(prev => ({ ...prev, users: false }));
+      setLoadingStates(prev => ({ ...prev, allUsers: false }));
     }
-  }, [state.users, loadingStates.users]);
+  }, [state.users, loadingStates.allUsers]);
 
   // Memoize callback functions to prevent unnecessary re-renders
   const loadAllListings = useCallback(async (forceRefresh: boolean = false) => {
     // Prevent duplicate calls
-    if (loadingStates.listings && !forceRefresh) {
+    if (loadingStates.allListings && !forceRefresh) {
       return;
     }
 
-    setLoadingStates(prev => ({ ...prev, listings: true }));
+    setLoadingStates(prev => ({ ...prev, allListings: true }));
 
     try {
       // Check cache first (unless force refresh)
@@ -958,9 +947,9 @@ export function AppProvider({ children }: AppProviderProps) {
       // Fallback to empty array if API fails
       dispatch({ type: 'SET_ALL_LISTINGS', payload: [] });
     } finally {
-      setLoadingStates(prev => ({ ...prev, listings: false }));
+      setLoadingStates(prev => ({ ...prev, allListings: false }));
     }
-  }, [listingsCache.data, listingsCache.timestamp, listingsCache.ttl, loadUsersIfNeeded, loadingStates.listings, state.currentUser?.id, state.vehicles]);
+  }, [listingsCache.data, listingsCache.timestamp, listingsCache.ttl, loadUsersIfNeeded, loadingStates.allListings, state.currentUser?.id, state.vehicles]);
 
   // Memoize other frequently used functions
   const login = useCallback(async (username: string, password: string, rememberMe: boolean = false) => {
