@@ -1,15 +1,14 @@
 # Dependencies
 /node_modules
+/backend/node_modules
 /.pnp
 .pnp.js
-backend/node_modules
 
 # Testing
 /coverage
 
 # Production builds
 /build
-/dist
 
 # Environment variables - CRITICAL: Never upload these!
 .env
@@ -17,6 +16,7 @@ backend/node_modules
 .env.development.local
 .env.test.local
 .env.production.local
+.env.example
 backend/.env
 backend/.env.local
 backend/.env.production
