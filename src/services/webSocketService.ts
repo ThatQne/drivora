@@ -37,11 +37,8 @@ class WebSocketService {
   private isConnected = false;
   private messageQueue: WebSocketMessage[] = [];
 
-  // WebSocket server URL - adjust based on your backend
-  private readonly WS_URL = process.env.REACT_APP_WS_URL || 
-                           (process.env.NODE_ENV === 'production' 
-                             ? 'wss://your-backend-domain.com' 
-                             : 'ws://localhost:5000');
+  // WebSocket server URL
+  private readonly WS_URL = 'wss://drivora.onrender.com';
 
   connect(userId: string, token: string) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
