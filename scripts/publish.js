@@ -55,17 +55,13 @@ async function main() {
       // Push changes
       log('📤 Pushing changes to GitHub...', colors.blue);
       await runCommand('git push', 'Failed to push changes');
+      
+      log('✅ Changes pushed successfully!', colors.green);
+      log('🔄 GitHub Actions will handle the deployment automatically', colors.blue);
+      log('🌎 Your site will be available at: https://ThatQne.github.io/drivora', colors.green);
     } else {
-      log('✅ No changes to commit', colors.green);
+      log('✨ No changes to commit', colors.green);
     }
-
-    // Build and deploy to GitHub Pages
-    log('🚀 Deploying to GitHub Pages...', colors.blue);
-    await runCommand('npm run build', 'Failed to build the project');
-    await runCommand('npx gh-pages -d build --git git', 'Failed to deploy to GitHub Pages');
-
-    log('✅ Successfully published!', colors.green);
-    log('🌎 Your site will be available at: https://ThatQne.github.io/drivora', colors.green);
   } catch (error) {
     log('❌ Publish process failed', colors.red);
     log(error.message, colors.red);
