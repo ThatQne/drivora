@@ -34,54 +34,40 @@ async function main() {
   try {
     log('🚀 Starting publish process...', colors.blue);
 
-    // Check if there are any changes to commit
+    // Check for changes
     const { stdout: status } = await execAsync('git status --porcelain');
     if (status) {
-      // Changes exist, commit them
       log('📦 Changes detected, committing...', colors.blue);
-      
-      // Add all changes
-      if (!await runCommand('git add .', 'Failed to stage changes')) {
-        process.exit(1);
-      }
-
-      // Get the current date for the commit message
-      const date = new Date().toLocaleString('en-US', {
+      const timestamp = new Date().toLocaleString('en-US', {
+        timeZone: 'UTC',
         year: 'numeric',
         month: 'short',
         day: 'numeric',
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
+        hour12: false
       });
 
-      // Commit changes
-      if (!await runCommand(
-        `git commit -m "Update: ${date}"`,
-        'Failed to commit changes'
-      )) {
-        process.exit(1);
-      }
-
-      // Push to main branch
+      // Add and commit changes
+      await runCommand('git add .', 'Failed to stage changes');
+      await runCommand(`git commit -m "Update: ${timestamp}"`, 'Failed to commit changes');
+      
+      // Push changes
       log('📤 Pushing changes to GitHub...', colors.blue);
-      if (!await runCommand('git push origin main', 'Failed to push changes')) {
-        process.exit(1);
-      }
+      await runCommand('git push', 'Failed to push changes');
     } else {
       log('✅ No changes to commit', colors.green);
     }
 
-    // Deploy to GitHub Pages
+    // Build and deploy to GitHub Pages
     log('🚀 Deploying to GitHub Pages...', colors.blue);
-    if (!await runCommand('npm run deploy', 'Failed to deploy to GitHub Pages')) {
-      process.exit(1);
-    }
+    await runCommand('npm run build', 'Failed to build the project');
+    await runCommand('npx gh-pages -d build --git git', 'Failed to deploy to GitHub Pages');
 
-    log('✅ Successfully published and deployed!', colors.green);
-    log('🌐 Your site will be available at: https://thatqne.github.io/drivora', colors.blue);
-
+    log('✅ Successfully published!', colors.green);
+    log('🌎 Your site will be available at: https://ThatQne.github.io/drivora', colors.green);
   } catch (error) {
-    log('❌ Publish process failed:', colors.red);
+    log('❌ Publish process failed', colors.red);
     log(error.message, colors.red);
     process.exit(1);
   }
