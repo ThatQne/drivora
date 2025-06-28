@@ -208,7 +208,7 @@ export function ListingForm({ vehicle, listing, onClose }: ListingFormProps) {
 
             <div>
               <label className="block text-sm font-medium text-primary-300 mb-2">
-                Description *
+                Description (Optional)
               </label>
               <textarea
                 name="description"
@@ -217,7 +217,6 @@ export function ListingForm({ vehicle, listing, onClose }: ListingFormProps) {
                 rows={4}
                 className="input-field resize-none"
                 placeholder="Describe your vehicle's condition, history, and any notable features..."
-                required
               />
             </div>
 

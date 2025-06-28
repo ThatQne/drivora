@@ -230,6 +230,15 @@ router.post('/', auth, async (req, res) => {
       listingId: message.listingId
     };
 
+    // 🔗 WEBSOCKET: Broadcast new message to receiver
+    if (req.app.locals.webSocket) {
+      req.app.locals.webSocket.broadcastToUser(receiverId, {
+        type: 'MESSAGE_RECEIVED',
+        data: formattedMessage,
+        timestamp: new Date().toISOString()
+      });
+    }
+
     res.status(201).json(formattedMessage);
   } catch (error) {
     console.error('Error sending message:', error);

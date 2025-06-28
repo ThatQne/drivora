@@ -240,8 +240,8 @@ router.post('/', auth, async (req, res) => {
     } = req.body;
 
     // Validation
-    if (!vehicleId || !title || !description || price === undefined) {
-      return res.status(400).json({ error: 'Vehicle, title, description, and price are required' });
+    if (!vehicleId || !title || price === undefined) {
+      return res.status(400).json({ error: 'Vehicle, title, and price are required' });
     }
 
     // Check if vehicle exists and belongs to user
@@ -281,6 +281,15 @@ router.post('/', auth, async (req, res) => {
     // Populate and return
     await listing.populate('vehicleId');
     await listing.populate('sellerId', 'username firstName lastName rating reviewCount');
+
+    // 🔗 WEBSOCKET: Broadcast new listing to all users
+    if (req.app.locals.webSocket) {
+      req.app.locals.webSocket.broadcastToAll({
+        type: 'LISTING_ADDED',
+        data: listing,
+        timestamp: new Date().toISOString()
+      }, req.user._id); // Exclude the creator
+    }
 
     res.status(201).json(listing);
 
@@ -325,6 +334,15 @@ router.put('/:id', auth, async (req, res) => {
     // Populate and return
     await listing.populate('vehicleId');
     await listing.populate('sellerId', 'username firstName lastName rating reviewCount');
+
+    // 🔗 WEBSOCKET: Broadcast listing update to all users
+    if (req.app.locals.webSocket) {
+      req.app.locals.webSocket.broadcastToAll({
+        type: 'LISTING_UPDATED',
+        data: listing,
+        timestamp: new Date().toISOString()
+      }, req.user._id); // Exclude the updater
+    }
 
     res.json(listing);
 
@@ -401,6 +419,15 @@ router.delete('/:id', auth, async (req, res) => {
 
     // Delete listing
     await Listing.deleteOne({ _id: req.params.id });
+
+    // 🔗 WEBSOCKET: Broadcast listing deletion to all users
+    if (req.app.locals.webSocket) {
+      req.app.locals.webSocket.broadcastToAll({
+        type: 'LISTING_DELETED',
+        data: { listingId: req.params.id },
+        timestamp: new Date().toISOString()
+      }, req.user._id); // Exclude the deleter
+    }
 
     res.json({ message: 'Listing deleted successfully' });
 

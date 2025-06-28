@@ -112,6 +112,17 @@ router.post('/', auth, async (req, res) => {
     });
 
     await vehicle.save();
+
+    // 🔗 WEBSOCKET: Broadcast new vehicle to user
+    if (req.app.locals.webSocket) {
+      req.app.locals.webSocket.broadcastToUser(req.user._id.toString(), {
+        type: 'VEHICLE_ADDED',
+        data: vehicle,
+        userId: req.user._id.toString(),
+        timestamp: new Date().toISOString()
+      });
+    }
+
     res.status(201).json(vehicle);
 
   } catch (error) {
@@ -189,6 +200,16 @@ router.put('/:id', auth, async (req, res) => {
         console.error('Error updating listing timestamp:', listingError);
         // Don't fail the vehicle update if listing sync fails
       }
+    }
+
+    // 🔗 WEBSOCKET: Broadcast vehicle update to user
+    if (req.app.locals.webSocket) {
+      req.app.locals.webSocket.broadcastToUser(req.user._id.toString(), {
+        type: 'VEHICLE_UPDATED',
+        data: vehicle,
+        userId: req.user._id.toString(),
+        timestamp: new Date().toISOString()
+      });
     }
 
     res.json(vehicle);

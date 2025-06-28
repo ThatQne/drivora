@@ -34,7 +34,7 @@ interface PendingMessage {
 }
 
 export function MessagesView() {
-  const { state, sendMessage, markMessagesAsRead } = useApp();
+  const { state, sendMessage, markMessagesAsRead, checkForNewMessages } = useApp();
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -62,6 +62,7 @@ export function MessagesView() {
   const typingTimeoutRef = useRef<NodeJS.Timeout>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastScrollHeight = useRef<number>(0);
+  const messageCheckIntervalRef = useRef<NodeJS.Timeout>();
 
   // Use conversations from state (loaded from API) with fallback to creating from messages
   const conversations = useMemo(() => {
@@ -333,6 +334,52 @@ export function MessagesView() {
       preserveScrollPosition();
     }
   }, [messagePagination, selectedConversation]);
+
+  // Set up automatic message checking when component mounts
+  useEffect(() => {
+    console.log('📱 MessagesView mounted, setting up automatic message checking');
+    
+    // Check for new messages immediately
+    checkForNewMessages();
+    
+    // Set up interval to check for new messages every 10 seconds when in messages view
+    messageCheckIntervalRef.current = setInterval(() => {
+      checkForNewMessages();
+    }, 10000);
+    
+    // Cleanup on unmount
+    return () => {
+      if (messageCheckIntervalRef.current) {
+        clearInterval(messageCheckIntervalRef.current);
+      }
+    };
+  }, [checkForNewMessages]);
+
+  // Check for new messages more frequently when actively in a conversation
+  useEffect(() => {
+    if (selectedConversation) {
+      console.log('💬 Active conversation selected, increasing message check frequency');
+      
+      // Clear existing interval
+      if (messageCheckIntervalRef.current) {
+        clearInterval(messageCheckIntervalRef.current);
+      }
+      
+      // Check more frequently (every 3 seconds) when in active conversation
+      messageCheckIntervalRef.current = setInterval(() => {
+        checkForNewMessages();
+      }, 3000);
+    } else {
+      // Reset to normal frequency when no conversation selected
+      if (messageCheckIntervalRef.current) {
+        clearInterval(messageCheckIntervalRef.current);
+      }
+      
+      messageCheckIntervalRef.current = setInterval(() => {
+        checkForNewMessages();
+      }, 10000);
+    }
+  }, [selectedConversation, checkForNewMessages]);
 
   const handleSendMessage = async () => {
     if (!messageText.trim() || !selectedConversationUser || loading) return;

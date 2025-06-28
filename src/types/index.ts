@@ -31,6 +31,9 @@ export interface Vehicle {
   isAuctioned?: boolean;
   listingId?: string;
   auctionId?: string;
+  // Trade status tracking
+  inTrade?: boolean;
+  tradeId?: string;
 }
 
 export interface Listing {
@@ -61,6 +64,8 @@ export interface Listing {
   // Virtual fields from backend
   priceChanged?: boolean;
   previousPrice?: number;
+  // Trade status tracking
+  inTrade?: boolean;
 }
 
 export interface Auction {

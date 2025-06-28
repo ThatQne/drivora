@@ -11,7 +11,6 @@ import {
   Car, 
   User, 
   MessageCircle, 
-  RefreshCw,
   Phone,
   Clock,
   ChevronLeft,
@@ -23,10 +22,10 @@ import { Listing, Vehicle } from '../../types/index.ts';
 import { ListingDetailView } from './ListingDetailView.tsx';
 import { SellerProfileView } from '../profile/SellerProfileView.tsx';
 import { TradeOfferModal } from '../trades/TradeOfferModal.tsx';
-import { SkeletonGrid } from '../common/SkeletonCard.tsx';
+import { MessageButton } from '../messages/MessageButton';
 
 export function ListingsView() {
-  const { state, incrementListingViews, loadAllListings, getUserProfile, getListingsCount } = useApp();
+  const { state, incrementListingViews, loadAllListings, getUserProfile } = useApp();
   const [selectedListing, setSelectedListing] = useState<any>(null);
   const [selectedSeller, setSelectedSeller] = useState<any>(null);
   const [showTradeOffer, setShowTradeOffer] = useState(false);
@@ -40,35 +39,13 @@ export function ListingsView() {
   const [yearRange, setYearRange] = useState([1990, new Date().getFullYear()]);
   const [showFilters, setShowFilters] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [listingCount, setListingCount] = useState<number | null>(null);
-
-  // Load listing count first, then actual listings
-  useEffect(() => {
-    const loadListingData = async () => {
-      try {
-        // Get count first for skeleton loading
-        const count = await getListingsCount();
-        setListingCount(count);
-        
-        // If we have listings in state, we're done loading
-        if (state.allListings.length > 0) {
-          setIsLoading(false);
-        }
-      } catch (error) {
-        console.error('Error loading listing count:', error);
-        setIsLoading(false);
-      }
-    };
-
-    loadListingData();
-  }, [getListingsCount]);
 
   // Update loading state when listings are loaded
   useEffect(() => {
-    if (state.allListings.length > 0 || (listingCount !== null && listingCount === 0)) {
+    if (state.allListings.length > 0) {
       setIsLoading(false);
     }
-  }, [state.allListings.length, listingCount]);
+  }, [state.allListings.length]);
 
   // Memoize listings processing to avoid re-computation on every render
   const listingsWithVehicles = useMemo(() => {
@@ -216,28 +193,11 @@ export function ListingsView() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-primary-100">Vehicle Listings</h1>
-          <p className="text-primary-300 mt-1">
-            Browse and search through available vehicles
-          </p>
-        </div>
-        <div className="flex items-center gap-4">
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => {}}
-            className="btn-secondary flex items-center gap-2"
-          >
-            <RefreshCw className={`w-4 h-4`} />
-            Refresh
-          </motion.button>
-          <div className="text-right">
-            <p className="text-2xl font-bold text-primary-100">{listingCount || 'Loading...'}</p>
-            <p className="text-sm text-primary-300">listings found</p>
-          </div>
-        </div>
+      <div>
+        <h1 className="text-3xl font-bold text-primary-100">Vehicle Listings</h1>
+        <p className="text-primary-300 mt-1">
+          Browse and search through available vehicles
+        </p>
       </div>
 
       {/* Search and Filters */}
@@ -342,9 +302,7 @@ export function ListingsView() {
       </div>
 
       {/* Loading State */}
-      {isLoading && listingCount !== null && listingCount > 0 ? (
-        <SkeletonGrid count={Math.min(listingCount, 6)} variant="listing" />
-      ) : isLoading ? (
+      {isLoading ? (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}

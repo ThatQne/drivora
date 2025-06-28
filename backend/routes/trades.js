@@ -316,6 +316,16 @@ router.post('/', auth, async (req, res) => {
       _id: undefined
     };
 
+    // 🔗 WEBSOCKET: Broadcast new trade to involved users
+    if (req.app.locals.webSocket) {
+      // Notify the receiver of the new trade offer
+      req.app.locals.webSocket.broadcastToUser(receiverUserId, {
+        type: 'TRADE_CREATED',
+        data: tradeWithId,
+        timestamp: new Date().toISOString()
+      });
+    }
+
     res.status(201).json(tradeWithId);
   } catch (error) {
     console.error('Error creating trade:', error);
@@ -667,6 +677,19 @@ router.put('/:id', auth, async (req, res) => {
       id: populatedTrade._id.toString(),
       _id: undefined
     };
+
+    // 🔗 WEBSOCKET: Broadcast trade update to both parties
+    if (req.app.locals.webSocket) {
+      const message = {
+        type: status === 'completed' ? 'TRADE_COMPLETED' : 'TRADE_UPDATED',
+        data: tradeWithId,
+        timestamp: new Date().toISOString()
+      };
+
+      // Notify both offerer and receiver
+      req.app.locals.webSocket.broadcastToUser(trade.offererUserId.toString(), message);
+      req.app.locals.webSocket.broadcastToUser(trade.receiverUserId.toString(), message);
+    }
 
     console.log(`📤 Sending response with trade ID: ${tradeWithId.id}`);
     res.json(tradeWithId);

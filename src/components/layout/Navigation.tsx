@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Car, ArrowLeftRight, MessageCircle, User, LogOut, Menu, X, List, Gavel } from 'lucide-react';
 import { useApp } from '../../context/AppContext.tsx';
 import { NavigationTab } from '../../types/index.ts';
+import webSocketService from '../../services/webSocketService.ts';
 
 interface NavigationProps {
   isMobile: boolean;
@@ -12,10 +13,22 @@ interface NavigationProps {
 }
 
 export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: NavigationProps) {
-  const { activeTab, setActiveTab, logout, state, loadMessagesOnTabSwitch } = useApp();
+  const { 
+    activeTab, 
+    setActiveTab, 
+    logout, 
+    state, 
+    loadMessagesOnTabSwitch,
+    loadGarageData,
+    loadTradesData,
+    loadListingsData,
+    loadAllListings,
+    loadUserMessages
+  } = useApp();
   const [isHovered, setIsHovered] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [hoverTimeout, setHoverTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -25,6 +38,19 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
       }
     };
   }, [hoverTimeout]);
+
+  // Monitor WebSocket connection status
+  useEffect(() => {
+    const checkConnection = () => {
+      setWsConnected(webSocketService.isConnectedToServer());
+    };
+
+    // Check immediately and then every 5 seconds
+    checkConnection();
+    const interval = setInterval(checkConnection, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   const navItems: Array<{ tab: NavigationTab; icon: React.ReactNode; label: string; badge?: number }> = [
     {
@@ -82,12 +108,46 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
     // Set the tab immediately for instant response
     setActiveTab(tab);
     
-    // Load messages in background for messages tab (non-blocking)
-    if (tab === 'messages') {
-      // Don't await - let it load in background
-      loadMessagesOnTabSwitch().catch(error => {
-        console.error('Error loading messages:', error);
-      });
+    // 🚀 PERFORMANCE FIX: Lazy load data based on tab
+    // Load data in background (non-blocking)
+    try {
+      switch (tab) {
+        case 'garage':
+          if (state.vehicles.length === 0) {
+            console.log('🚗 Loading garage data lazily...');
+            loadGarageData().catch(error => console.error('Error loading garage:', error));
+          }
+          break;
+          
+        case 'trades':
+          if (state.trades.length === 0) {
+            console.log('🔄 Loading trades data lazily...');
+            loadTradesData().catch(error => console.error('Error loading trades:', error));
+          }
+          break;
+          
+        case 'listings':
+          if (state.listings.length === 0) {
+            console.log('📋 Loading listings data lazily...');
+            loadListingsData().catch(error => console.error('Error loading listings:', error));
+          }
+          // Also load all listings for browsing
+          if (state.allListings.length === 0) {
+            loadAllListings().catch(error => console.error('Error loading all listings:', error));
+          }
+          break;
+          
+        case 'messages':
+          console.log('💬 Loading messages data lazily...');
+          loadUserMessages().catch(error => console.error('Error loading messages:', error));
+          break;
+          
+        case 'auctions':
+          // Auctions don't need special loading yet
+          break;
+      }
+    } catch (error) {
+      console.error('Error in lazy loading:', error);
     }
     
     if (isMobile) {
@@ -201,27 +261,16 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
 
             <div className="mt-8 pt-4 border-t border-primary-700/30">
               <motion.button
-                animate={{ 
-                  width: isCollapsed ? 48 : '100%',
-                  justifyContent: isCollapsed ? 'center' : 'flex-start'
-                }}
-                transition={{ 
-                  width: { duration: 0.2, ease: "easeOut" },
-                  justifyContent: { duration: 0.2, ease: "easeOut" }
-                }}
                 whileTap={{ scale: 0.98 }}
                 onClick={() => handleTabClick('profile')}
-                className={`h-12 flex items-center transition-colors mb-3 rounded-lg ${
-                  isCollapsed ? 'mx-auto justify-center' : 'px-3'
-                } ${
+                className={`w-full h-12 flex items-center transition-colors mb-3 rounded-lg px-3 ${
                   activeTab === 'profile'
-                    ? `bg-primary-100/10 text-primary-100 shadow-sm ${!isCollapsed ? 'border-l-4 border-primary-100' : ''}`
+                    ? 'bg-primary-100/10 text-primary-100 shadow-sm border-l-4 border-primary-100'
                     : 'text-primary-300 hover:bg-primary-800/30 hover:text-primary-100'
                 }`}
-                title={isCollapsed ? `@${state.currentUser?.username} - Profile` : undefined}
               >
-                {isCollapsed ? (
-                  /* Collapsed state - only profile icon, perfectly centered */
+                {/* Profile icon with WebSocket status */}
+                <div className="flex justify-center items-center flex-shrink-0 w-8 relative">
                   <div className="w-8 h-8 bg-primary-800/50 rounded-full flex items-center justify-center overflow-hidden">
                     {state.currentUser?.avatar ? (
                       <img
@@ -233,31 +282,20 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
                       <User className="w-5 h-5 text-primary-300" />
                     )}
                   </div>
-                ) : (
-                  /* Expanded state - icon + content */
-                  <>
-                    {/* Fixed profile icon */}
-                    <div className="flex justify-center items-center flex-shrink-0 w-8">
-                      <div className="w-8 h-8 bg-primary-800/50 rounded-full flex items-center justify-center overflow-hidden">
-                        {state.currentUser?.avatar ? (
-                          <img
-                            src={state.currentUser.avatar}
-                            alt="Profile"
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <User className="w-5 h-5 text-primary-300" />
-                        )}
-                      </div>
-                    </div>
-                    
-                    {/* Expandable profile info */}
-                    <div className="flex-1 overflow-hidden text-left whitespace-nowrap ml-2">
-                      <p className="font-medium text-primary-100 truncate">@{state.currentUser?.username}</p>
-                      <p className="text-sm text-primary-400 truncate">Profile</p>
-                    </div>
-                  </>
-                )}
+                  {/* WebSocket status dot - top right corner */}
+                  <div 
+                    className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-primary-900 ${
+                      wsConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                    }`}
+                    title={wsConnected ? 'Real-time: Connected' : 'Real-time: Disconnected'}
+                  />
+                </div>
+                
+                {/* Profile info */}
+                <div className="flex-1 overflow-hidden text-left whitespace-nowrap ml-3">
+                  <p className="font-medium text-primary-100 truncate">@{state.currentUser?.username}</p>
+                  <p className="text-sm text-primary-400 truncate">Profile</p>
+                </div>
               </motion.button>
 
               <motion.button
@@ -424,23 +462,32 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
               title={isCollapsed ? `@${state.currentUser?.username} - Profile` : undefined}
             >
               {isCollapsed ? (
-                /* Collapsed state - only profile icon, perfectly centered */
-                <div className="w-8 h-8 bg-primary-800/50 rounded-full flex items-center justify-center overflow-hidden">
-                  {state.currentUser?.avatar ? (
-                    <img
-                      src={state.currentUser.avatar}
-                      alt="Profile"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <User className="w-5 h-5 text-primary-300" />
-                  )}
+                /* Collapsed state - profile icon with WebSocket status dot */
+                <div className="relative">
+                  <div className="w-8 h-8 bg-primary-800/50 rounded-full flex items-center justify-center overflow-hidden">
+                    {state.currentUser?.avatar ? (
+                      <img
+                        src={state.currentUser.avatar}
+                        alt="Profile"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <User className="w-5 h-5 text-primary-300" />
+                    )}
+                  </div>
+                  {/* WebSocket status dot - top right corner */}
+                  <div 
+                    className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-primary-900 ${
+                      wsConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                    }`}
+                    title={wsConnected ? 'Real-time: Connected' : 'Real-time: Disconnected'}
+                  />
                 </div>
               ) : (
-                /* Expanded state - icon + content */
+                /* Expanded state - icon + content with WebSocket status */
                 <>
-                  {/* Fixed profile icon */}
-                  <div className="flex justify-center items-center flex-shrink-0 w-8">
+                  {/* Fixed profile icon with WebSocket status */}
+                  <div className="flex justify-center items-center flex-shrink-0 w-8 relative">
                     <div className="w-8 h-8 bg-primary-800/50 rounded-full flex items-center justify-center overflow-hidden">
                       {state.currentUser?.avatar ? (
                         <img
@@ -452,6 +499,13 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
                         <User className="w-5 h-5 text-primary-300" />
                       )}
                     </div>
+                    {/* WebSocket status dot - top right corner */}
+                    <div 
+                      className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-primary-900 ${
+                        wsConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                      }`}
+                      title={wsConnected ? 'Real-time: Connected' : 'Real-time: Disconnected'}
+                    />
                   </div>
                   
                   {/* Expandable profile info */}

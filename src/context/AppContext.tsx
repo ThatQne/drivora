@@ -3,6 +3,7 @@ import { AppState, User, Vehicle, Listing, Auction, Trade, Message, Conversation
 import { AuthService } from '../services/authService.ts';
 import { DataService } from '../services/dataService.ts';
 import ApiService from '../services/apiService.ts';
+import webSocketService from '../services/webSocketService.ts';
 
 interface AppContextType {
   state: AppState;
@@ -26,13 +27,12 @@ interface AppContextType {
   deleteVehicle: (vehicleId: string) => Promise<void>;
   getUserVehicles: (userId: string) => Promise<Vehicle[]>;
   getVehiclesCount: () => Promise<number>;
-  addListing: (listing: Omit<Listing, 'id' | 'createdAt' | 'updatedAt' | 'views'>) => Promise<void>;
+  addListing: (listing: Omit<Listing, 'id' | 'createdAt' | 'updatedAt' | 'views' | 'lastRenewed' | 'canRenewAfter'>) => Promise<void>;
   updateListing: (listing: Listing) => Promise<void>;
   deleteListing: (listingId: string) => Promise<void>;
   renewListing: (listingId: string) => Promise<void>;
   incrementListingViews: (listingId: string) => Promise<void>;
   loadAllListings: (forceRefresh?: boolean) => Promise<void>;
-  getListingsCount: () => Promise<number>;
   addReview: (review: Omit<Review, 'id' | 'createdAt'>) => Promise<void>;
   getUserProfile: (userId: string) => User | null;
   sendMessage: (message: Omit<Message, 'id' | 'timestamp' | 'read'>) => Promise<void>;
@@ -47,6 +47,12 @@ interface AppContextType {
   setActiveTab: (tab: NavigationTab) => void;
   loadUserMessages: () => Promise<void>;
   loadMessagesOnTabSwitch: () => Promise<void>;
+  loadGarageData: () => Promise<void>;
+  loadTradesData: () => Promise<void>;
+  loadListingsData: () => Promise<void>;
+  // Trade helper functions
+  isVehicleInPendingTrade: (vehicleId: string) => boolean;
+  getVehicleTradeStatus: (vehicleId: string) => { inTrade: boolean; tradeId?: string; tradeStatus?: string };
 }
 
 type AppAction = 
@@ -132,7 +138,11 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_LISTINGS':
       return { ...state, listings: action.payload };
     case 'ADD_LISTING':
-      return { ...state, listings: [...state.listings, action.payload] };
+      return { 
+        ...state, 
+        listings: [...state.listings, action.payload],
+        allListings: [...state.allListings, action.payload] // Also update allListings
+      };
     case 'UPDATE_LISTING':
       return {
         ...state,
@@ -153,18 +163,106 @@ function appReducer(state: AppState, action: AppAction): AppState {
         trades: state.trades.map(t => t.id === action.payload.id ? action.payload : t),
       };
     case 'SET_MESSAGES':
-      return { ...state, messages: action.payload };
-    case 'ADD_MESSAGE':
-      return { ...state, messages: [...state.messages, action.payload] };
-    case 'UPDATE_CONVERSATION':
-      const { conversationId, lastMessage, updatedAt } = action.payload;
-      const existingConversationIndex = state.conversations.findIndex(c => c.id === conversationId);
+      // 🚫 PREVENT DUPLICATES: Handle both full replacement and smart merging
+      const incomingMessages = action.payload;
       
+      // If we have no existing messages, just set them
+      if (state.messages.length === 0) {
+        console.log('📨 SET_MESSAGES: Setting initial messages:', incomingMessages.length);
+        return { ...state, messages: incomingMessages };
+      }
+      
+      // If incoming messages are already processed (from markMessagesAsRead), replace them
+      if (incomingMessages.length === state.messages.length) {
+        console.log('📨 SET_MESSAGES: Replacing messages (likely from markMessagesAsRead)');
+        return { ...state, messages: incomingMessages };
+      }
+      
+      // Otherwise, merge to prevent duplicates
+      const existingMessageIds = new Set(state.messages.map(msg => msg.id));
+      const newUniqueMessages = incomingMessages.filter(msg => !existingMessageIds.has(msg.id));
+      const allUniqueMessages = [...state.messages, ...newUniqueMessages];
+      
+      console.log('📨 SET_MESSAGES: Merging messages without duplicates:', {
+        existing: state.messages.length,
+        incoming: incomingMessages.length,
+        newUnique: newUniqueMessages.length,
+        total: allUniqueMessages.length
+      });
+      
+      return { ...state, messages: allUniqueMessages };
+    case 'ADD_MESSAGE':
+      const newMessage = action.payload;
+      
+      // 🚫 PREVENT DUPLICATES: Check if message already exists
+      const messageExists = state.messages.some(msg => msg.id === newMessage.id);
+      if (messageExists) {
+        console.log('⚠️ Preventing duplicate message:', newMessage.id);
+        return state;
+      }
+      
+      const updatedMessages = [...state.messages, newMessage];
+      
+      // Update or create conversation for this message
+      const senderId = typeof newMessage.senderId === 'object' ? (newMessage.senderId as any).id : newMessage.senderId;
+      const receiverId = typeof newMessage.receiverId === 'object' ? (newMessage.receiverId as any).id : newMessage.receiverId;
+      const conversationId = [senderId, receiverId].sort().join('-');
+      
+      // Find existing conversation
+      const existingConversationIndex = state.conversations.findIndex(c => c.id === conversationId);
       let updatedConversations;
+      
       if (existingConversationIndex !== -1) {
         // Update existing conversation
         updatedConversations = state.conversations.map(c =>
           c.id === conversationId ? {
+            ...c,
+            lastMessage: newMessage,
+            updatedAt: new Date().toISOString(),
+            // 📨 SMART UNREAD: Only increment if current user is receiver AND message is actually new
+            unreadCount: (receiverId === state.currentUser?.id && !newMessage.read) ? c.unreadCount + 1 : c.unreadCount
+          } : c
+        );
+      } else {
+        // Create new conversation
+        const newConversation: Conversation = {
+          id: conversationId,
+          participants: [senderId, receiverId],
+          lastMessage: newMessage,
+          unreadCount: (receiverId === state.currentUser?.id && !newMessage.read) ? 1 : 0,
+          updatedAt: new Date().toISOString(),
+        };
+        updatedConversations = [...state.conversations, newConversation];
+      }
+      
+      // Sort conversations by most recent activity
+      updatedConversations.sort((a, b) => 
+        new Date(b.updatedAt || b.lastMessage?.timestamp || 0).getTime() - 
+        new Date(a.updatedAt || a.lastMessage?.timestamp || 0).getTime()
+      );
+      
+      console.log('📨 ADD_MESSAGE: Added new message without duplicates:', {
+        messageId: newMessage.id,
+        conversationId,
+        conversationsCount: updatedConversations.length,
+        isReceiver: receiverId === state.currentUser?.id,
+        messageRead: newMessage.read
+      });
+      
+      return { 
+        ...state, 
+        messages: updatedMessages,
+        conversations: updatedConversations
+      };
+    case 'UPDATE_CONVERSATION':
+      const { conversationId: updateConversationId, lastMessage, updatedAt } = action.payload;
+      const existingUpdateConversationIndex = state.conversations.findIndex(c => c.id === updateConversationId);
+      
+      let updatedUpdateConversations;
+      if (existingUpdateConversationIndex !== -1) {
+        // Update existing conversation
+        updatedUpdateConversations = state.conversations.map(c =>
+          c.id === updateConversationId ? {
             ...c,
             lastMessage,
             updatedAt,
@@ -176,25 +274,25 @@ function appReducer(state: AppState, action: AppAction): AppState {
         const receiverId = typeof lastMessage.receiverId === 'object' ? (lastMessage.receiverId as any).id : lastMessage.receiverId;
         
         const newConversation: Conversation = {
-          id: conversationId,
+          id: updateConversationId,
           participants: [senderId, receiverId],
           lastMessage,
           unreadCount: 0,
           updatedAt,
         };
         
-        updatedConversations = [...state.conversations, newConversation];
+        updatedUpdateConversations = [...state.conversations, newConversation];
       }
       
       // Sort conversations by most recent activity
-      updatedConversations.sort((a, b) => 
+      updatedUpdateConversations.sort((a, b) => 
         new Date(b.updatedAt || b.lastMessage?.timestamp || 0).getTime() - 
         new Date(a.updatedAt || a.lastMessage?.timestamp || 0).getTime()
       );
       
       return {
         ...state,
-        conversations: updatedConversations,
+        conversations: updatedUpdateConversations,
       };
     case 'SET_CONVERSATIONS':
       console.log('📞 Setting conversations in state:', action.payload.length, 'conversations');
@@ -212,7 +310,12 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_USERS':
       return { ...state, users: action.payload };
     case 'SET_ALL_LISTINGS':
-      return { ...state, allListings: action.payload };
+      // Ensure we don't lose any local listings that might not be in the payload
+      const existingLocalListings = state.listings.filter(l => !action.payload.find(p => p.id === l.id));
+      return { 
+        ...state, 
+        allListings: [...action.payload, ...existingLocalListings]
+      };
     default:
       return state;
   }
@@ -238,7 +341,190 @@ export function AppProvider({ children }: AppProviderProps) {
     userData: boolean;
     users: boolean;
     listings: boolean;
-  }>({ userData: false, users: false, listings: false });
+    garage: boolean;
+    trades: boolean;
+    messages: boolean;
+  }>({
+    userData: false,
+    users: false,
+    listings: false,
+    garage: false,
+    trades: false,
+    messages: false
+  });
+
+  // 🔗 WEBSOCKET INTEGRATION: Setup real-time updates
+  useEffect(() => {
+    if (state.currentUser && state.isAuthenticated) {
+      const token = localStorage.getItem('carTrade_token');
+      if (token) {
+        console.log('🔗 Connecting to WebSocket for real-time updates...');
+        webSocketService.connect(state.currentUser.id, token);
+
+        // Setup WebSocket callbacks for real-time updates
+        webSocketService.setCallbacks({
+          // 📋 LISTING UPDATES
+          onListingAdded: (listing) => {
+            console.log('📋 Real-time: New listing added:', listing.title);
+            const listingWithId = { ...listing, id: listing._id || listing.id };
+            
+            // Add to all listings if we have them loaded
+            if (state.allListings.length > 0) {
+              dispatch({ type: 'SET_ALL_LISTINGS', payload: [...state.allListings, listingWithId] });
+            }
+
+            // Add to user's own listings if it's theirs
+            if (listing.sellerId === state.currentUser?.id) {
+              dispatch({ type: 'ADD_LISTING', payload: listingWithId });
+              
+              // Update vehicle status to mark as listed
+              const vehicle = state.vehicles.find(v => v.id === listing.vehicleId);
+              if (vehicle) {
+                const updatedVehicle: Vehicle = {
+                  ...vehicle,
+                  isListed: true,
+                  listingId: listingWithId.id,
+                  updatedAt: new Date().toISOString(),
+                };
+                dispatch({ type: 'UPDATE_VEHICLE', payload: updatedVehicle });
+                console.log('🚗 Vehicle marked as listed in garage via WebSocket');
+              }
+            }
+          },
+
+          onListingUpdated: (listing) => {
+            console.log('📋 Real-time: Listing updated:', listing.title);
+            const listingWithId = { ...listing, id: listing._id || listing.id };
+            
+            // Update in all listings
+            if (state.allListings.length > 0) {
+              const updatedAllListings = state.allListings.map(l => 
+                l.id === listingWithId.id ? listingWithId : l
+              );
+              dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
+            }
+
+            // Update in user's own listings if it's theirs
+            if (listing.sellerId === state.currentUser?.id) {
+              dispatch({ type: 'UPDATE_LISTING', payload: listingWithId });
+            }
+          },
+
+          onListingDeleted: (listingId) => {
+            console.log('📋 Real-time: Listing deleted:', listingId);
+            
+            // Remove from all listings
+            if (state.allListings.length > 0) {
+              const updatedAllListings = state.allListings.filter(l => l.id !== listingId);
+              dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
+            }
+
+            // Remove from user's own listings
+            dispatch({ type: 'DELETE_LISTING', payload: listingId });
+          },
+
+          // 🔄 TRADE UPDATES
+          onTradeCreated: (trade) => {
+            console.log('🔄 Real-time: New trade created:', trade.id);
+            const tradeWithId = { ...trade, id: trade._id || trade.id };
+            
+            // Add to trades if current user is involved
+            if (trade.offererUserId === state.currentUser?.id || trade.receiverUserId === state.currentUser?.id) {
+              dispatch({ type: 'ADD_TRADE', payload: tradeWithId });
+            }
+          },
+
+          onTradeUpdated: (trade) => {
+            console.log('🔄 Real-time: Trade updated:', trade.id);
+            const tradeWithId = { ...trade, id: trade._id || trade.id };
+            
+            // Update trade if current user is involved
+            if (trade.offererUserId === state.currentUser?.id || trade.receiverUserId === state.currentUser?.id) {
+              dispatch({ type: 'UPDATE_TRADE', payload: tradeWithId });
+            }
+          },
+
+          onTradeCompleted: (trade) => {
+            console.log('🔄 Real-time: Trade completed:', trade.id);
+            const tradeWithId = { ...trade, id: trade._id || trade.id };
+            
+            // Update trade
+            dispatch({ type: 'UPDATE_TRADE', payload: tradeWithId });
+            
+            // If current user was involved, reload garage to show new cars
+            if (trade.offererUserId === state.currentUser?.id || trade.receiverUserId === state.currentUser?.id) {
+              console.log('🚗 Reloading garage after trade completion...');
+              setTimeout(async () => {
+                try {
+                  const vehicles = await ApiService.getUserVehicles();
+                  const vehiclesWithId = vehicles.map((v: any) => ({ ...v, id: v._id || v.id }));
+                  dispatch({ type: 'SET_VEHICLES', payload: vehiclesWithId });
+                  console.log('✅ Garage updated with new cars from trade');
+                } catch (error) {
+                  console.error('❌ Error reloading garage after trade:', error);
+                }
+              }, 1000); // Small delay to ensure backend processing is complete
+            }
+          },
+
+          // 📨 MESSAGE UPDATES
+          onMessageReceived: (message) => {
+            console.log('📨 Real-time: New message received:', message.content.substring(0, 30));
+            const messageWithId = { ...message, id: message._id || message.id };
+            
+            // Only add if message involves current user
+            const senderId = typeof message.senderId === 'object' ? message.senderId.id : message.senderId;
+            const receiverId = typeof message.receiverId === 'object' ? message.receiverId.id : message.receiverId;
+            
+            if (senderId === state.currentUser?.id || receiverId === state.currentUser?.id) {
+              dispatch({ type: 'ADD_MESSAGE', payload: messageWithId });
+            }
+          },
+
+          // 🚗 VEHICLE UPDATES
+          onVehicleAdded: (vehicle, userId) => {
+            console.log('🚗 Real-time: New vehicle added by user:', userId);
+            
+            // Only update if it's current user's vehicle
+            if (userId === state.currentUser?.id) {
+              const vehicleWithId = { ...vehicle, id: vehicle._id || vehicle.id };
+              dispatch({ type: 'ADD_VEHICLE', payload: vehicleWithId });
+            }
+          },
+
+          onVehicleUpdated: (vehicle, userId) => {
+            console.log('🚗 Real-time: Vehicle updated by user:', userId);
+            
+            // Only update if it's current user's vehicle
+            if (userId === state.currentUser?.id) {
+              const vehicleWithId = { ...vehicle, id: vehicle._id || vehicle.id };
+              dispatch({ type: 'UPDATE_VEHICLE', payload: vehicleWithId });
+            }
+          },
+
+          // 🔗 CONNECTION STATUS
+          onConnectionChange: (connected) => {
+            console.log(connected ? '✅ WebSocket connected' : '❌ WebSocket disconnected');
+            // You could show a connection status indicator in the UI
+          }
+        });
+      }
+    }
+
+    // Cleanup WebSocket on logout or unmount
+    return () => {
+      if (!state.isAuthenticated) {
+        webSocketService.disconnect();
+      }
+    };
+  }, [state.currentUser, state.isAuthenticated]);
+
+  // Disconnect WebSocket on logout
+  useEffect(() => {
+    if (!state.isAuthenticated) {
+      webSocketService.disconnect();
+    }
+  }, [state.isAuthenticated]);
 
   useEffect(() => {
     // Initialize app state by checking API authentication
@@ -254,7 +540,19 @@ export function AppProvider({ children }: AppProviderProps) {
         if (authCheck.valid && authCheck.user) {
           const user = { ...authCheck.user, id: (authCheck.user as any)._id || authCheck.user.id };
           dispatch({ type: 'SET_CURRENT_USER', payload: user });
-          await loadUserData(user.id);
+          
+          // 🚗 Load garage data immediately since it's the default tab users see
+          try {
+            console.log('🚗 Loading garage data on startup...');
+            const vehicles = await ApiService.getUserVehicles();
+            const vehiclesWithId = vehicles.map((v: any) => ({ ...v, id: v._id || v.id }));
+            dispatch({ type: 'SET_VEHICLES', payload: vehiclesWithId });
+            console.log('✅ Garage data loaded on startup');
+          } catch (error) {
+            console.error('❌ Error loading garage data on startup:', error);
+          }
+          
+          console.log('✅ Auth verified');
         } else {
           ApiService.logout();
           AuthService.logout();
@@ -636,7 +934,24 @@ export function AppProvider({ children }: AppProviderProps) {
         ttl: 30000
       });
       
+      // Update state with new listings
       dispatch({ type: 'SET_ALL_LISTINGS', payload: listingsWithId });
+
+      // Update vehicle listing status for current user's vehicles
+      const userListings = listingsWithId.filter(l => l.sellerId === state.currentUser?.id);
+      userListings.forEach(listing => {
+        const vehicle = state.vehicles.find(v => v.id === listing.vehicleId);
+        if (vehicle && (!vehicle.isListed || vehicle.listingId !== listing.id)) {
+          const updatedVehicle: Vehicle = {
+            ...vehicle,
+            isListed: true,
+            listingId: listing.id,
+            updatedAt: new Date().toISOString(),
+          };
+          dispatch({ type: 'UPDATE_VEHICLE', payload: updatedVehicle });
+          console.log('🚗 Vehicle listing status synced:', vehicle.id);
+        }
+      });
       
     } catch (error) {
       console.error('Error loading all listings:', error);
@@ -645,7 +960,7 @@ export function AppProvider({ children }: AppProviderProps) {
     } finally {
       setLoadingStates(prev => ({ ...prev, listings: false }));
     }
-  }, [listingsCache.data, listingsCache.timestamp, listingsCache.ttl, loadUsersIfNeeded, loadingStates.listings]);
+  }, [listingsCache.data, listingsCache.timestamp, listingsCache.ttl, loadUsersIfNeeded, loadingStates.listings, state.currentUser?.id, state.vehicles]);
 
   // Memoize other frequently used functions
   const login = useCallback(async (username: string, password: string, rememberMe: boolean = false) => {
@@ -654,8 +969,19 @@ export function AppProvider({ children }: AppProviderProps) {
       // The ApiService.login should automatically store the token
       const user = { ...response.user, id: (response.user as any)._id || response.user.id };
       dispatch({ type: 'SET_CURRENT_USER', payload: user });
-      // Load user data after successful login
-      await loadUserData(user.id);
+      
+      // 🚗 Load garage data immediately since it's the default tab users see
+      try {
+        console.log('🚗 Loading garage data on login...');
+        const vehicles = await ApiService.getUserVehicles();
+        const vehiclesWithId = vehicles.map((v: any) => ({ ...v, id: v._id || v.id }));
+        dispatch({ type: 'SET_VEHICLES', payload: vehiclesWithId });
+        console.log('✅ Garage data loaded on login');
+      } catch (error) {
+        console.error('❌ Error loading garage data on login:', error);
+      }
+      
+      console.log('✅ Login successful');
       return { success: true };
     } catch (error: any) {
       console.error('Login error:', error);
@@ -682,8 +1008,19 @@ export function AppProvider({ children }: AppProviderProps) {
       const response = await ApiService.register(userData);
       const user = { ...response.user, id: (response.user as any)._id || response.user.id };
       dispatch({ type: 'SET_CURRENT_USER', payload: user });
-      // Load user data after successful registration
-      await loadUserData(user.id);
+      
+      // 🚗 Load garage data immediately since it's the default tab users see
+      try {
+        console.log('🚗 Loading garage data on registration...');
+        const vehicles = await ApiService.getUserVehicles();
+        const vehiclesWithId = vehicles.map((v: any) => ({ ...v, id: v._id || v.id }));
+        dispatch({ type: 'SET_VEHICLES', payload: vehiclesWithId });
+        console.log('✅ Garage data loaded on registration');
+      } catch (error) {
+        console.error('❌ Error loading garage data on registration:', error);
+      }
+      
+      console.log('✅ Registration successful');
       return { success: true };
     } catch (error: any) {
       console.error('Registration error:', error);
@@ -717,22 +1054,10 @@ export function AppProvider({ children }: AppProviderProps) {
     try {
       const newVehicle = await ApiService.createVehicle(vehicleData);
       
-      // Convert MongoDB _id to id for frontend compatibility
-      const mongoVehicle = newVehicle as any;
-      const vehicleWithId = { 
-        ...newVehicle, 
-        id: mongoVehicle._id || newVehicle.id,
-        // Ensure boolean fields have default values
-        isListed: newVehicle.isListed || false,
-        isAuctioned: newVehicle.isAuctioned || false
-      };
+      // 🔗 DON'T ADD LOCALLY - WebSocket will handle this automatically
+      // The backend will broadcast VEHICLE_ADDED which will update the UI
+      console.log('✅ Vehicle created, WebSocket will update UI automatically');
       
-      dispatch({ type: 'ADD_VEHICLE', payload: vehicleWithId });
-      
-      // Reload user data to ensure everything is in sync
-      if (state.currentUser) {
-        await loadUserData(state.currentUser.id);
-      }
     } catch (error) {
       console.error('Error adding vehicle:', error);
     }
@@ -741,13 +1066,30 @@ export function AppProvider({ children }: AppProviderProps) {
   const updateVehicle = async (updatedVehicle: Vehicle) => {
     try {
       const vehicle = await ApiService.updateVehicle(updatedVehicle.id, updatedVehicle);
+      
+      // 🚀 SMART UPDATE: Update vehicle in state immediately
       dispatch({ type: 'UPDATE_VEHICLE', payload: vehicle });
       
-      // If the vehicle has an active listing, refresh all listings to ensure 
-      // the listing shows the updated vehicle images
-      if (vehicle.isListed && vehicle.listingId) {
-        await loadAllListings(true);
+      // 🚗 SMART UPDATE: If the vehicle has an active listing, update it in all listings too
+      if (vehicle.isListed && vehicle.listingId && state.allListings.length > 0) {
+        const listing = state.allListings.find(l => l.id === vehicle.listingId);
+        if (listing) {
+          const updatedListing = {
+            ...listing,
+            vehicle: vehicle, // Update the vehicle data in the listing
+            updatedAt: new Date().toISOString()
+          };
+          
+          const updatedAllListings = state.allListings.map(l => 
+            l.id === vehicle.listingId ? updatedListing : l
+          );
+          dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
+          console.log('📋 Vehicle updated in marketplace listing');
+        }
       }
+      
+      console.log('✅ Vehicle updated with smart updates - no API refresh needed');
+      
     } catch (error) {
       console.error('Error updating vehicle:', error);
     }
@@ -763,16 +1105,14 @@ export function AppProvider({ children }: AppProviderProps) {
   };
 
   const addListing = async (listingData: Omit<Listing, 'id' | 'createdAt' | 'updatedAt' | 'views' | 'lastRenewed' | 'canRenewAfter'>) => {
-    if (!state.currentUser) return;
-
     try {
       const newListing = await ApiService.createListing(listingData);
+      
       // Convert MongoDB _id to id for frontend compatibility
       const mongoListing = newListing as any;
       const listingWithId = { ...newListing, id: mongoListing._id || newListing.id };
-      dispatch({ type: 'ADD_LISTING', payload: listingWithId });
-
-      // Update vehicle to mark as listed immediately in local state
+      
+      // 🚗 SMART UPDATE: Update vehicle to mark as listed immediately (this affects garage view)
       const vehicle = state.vehicles.find(v => v.id === listingData.vehicleId);
       if (vehicle) {
         const updatedVehicle: Vehicle = {
@@ -781,35 +1121,45 @@ export function AppProvider({ children }: AppProviderProps) {
           listingId: listingWithId.id,
           updatedAt: new Date().toISOString(),
         };
-        // Update local state immediately
         dispatch({ type: 'UPDATE_VEHICLE', payload: updatedVehicle });
+        console.log('🚗 Vehicle marked as listed in garage');
       }
 
-      // Reload all user data to ensure everything is in sync
-      if (state.currentUser) {
-        await loadUserData(state.currentUser.id);
-      }
-      
-      // Also refresh all listings to ensure new listing appears immediately
+      // 📋 SMART UPDATE: Add to user's own listings immediately (this affects listings tab)
+      dispatch({ type: 'ADD_LISTING', payload: listingWithId });
+      console.log('📋 Listing added to user listings');
+
+      // 🔄 FORCE REFRESH: Clear cache and reload all listings
+      setListingsCache({ data: [], timestamp: 0, ttl: 30000 });
       await loadAllListings(true);
+      console.log('🔄 Marketplace listings refreshed');
+      
+      console.log('✅ Listing created with local updates and marketplace refresh');
       
     } catch (error) {
       console.error('Error adding listing:', error);
+      throw error; // Re-throw so UI can show the error
     }
   };
 
   const updateListing = async (updatedListing: Listing) => {
     try {
       const listing = await ApiService.updateListing(updatedListing.id, updatedListing);
+      
+      // 🚀 SMART UPDATE: Update listing in user listings
       dispatch({ type: 'UPDATE_LISTING', payload: listing });
       
-      // Reload user data to ensure everything is in sync
-      if (state.currentUser) {
-        await loadUserData(state.currentUser.id);
+      // 📋 SMART UPDATE: Update in all listings if we have them loaded
+      if (state.allListings.length > 0) {
+        const updatedAllListings = state.allListings.map(l => 
+          l.id === listing.id ? listing : l
+        );
+        dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
+        console.log('📋 Listing updated in marketplace');
       }
       
-      // Also refresh all listings to ensure price changes are visible immediately
-      await loadAllListings(true);
+      console.log('✅ Listing updated with smart updates - no API refresh needed');
+      
     } catch (error) {
       console.error('Error updating listing:', error);
     }
@@ -818,12 +1168,35 @@ export function AppProvider({ children }: AppProviderProps) {
   const deleteListing = async (listingId: string) => {
     try {
       await ApiService.deleteListing(listingId);
+      
+      // 🚀 SMART UPDATE: Remove listing from user listings
       dispatch({ type: 'DELETE_LISTING', payload: listingId });
 
-      // Reload user data to ensure everything is in sync
-      if (state.currentUser) {
-        await loadUserData(state.currentUser.id);
+      // 🚗 SMART UPDATE: Update vehicle to mark as not listed
+      const listing = state.listings.find(l => l.id === listingId);
+      if (listing) {
+        const vehicle = state.vehicles.find(v => v.id === listing.vehicleId);
+        if (vehicle) {
+          const updatedVehicle: Vehicle = {
+            ...vehicle,
+            isListed: false,
+            listingId: undefined,
+            updatedAt: new Date().toISOString(),
+          };
+          dispatch({ type: 'UPDATE_VEHICLE', payload: updatedVehicle });
+          console.log('🚗 Vehicle marked as not listed in garage');
+        }
       }
+
+      // 📋 SMART UPDATE: Remove from all listings if we have them loaded
+      if (state.allListings.length > 0) {
+        const updatedAllListings = state.allListings.filter(l => l.id !== listingId);
+        dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
+        console.log('📋 Listing removed from marketplace');
+      }
+      
+      console.log('✅ Listing deleted with smart updates - no API refresh needed');
+
     } catch (error) {
       console.error('Error deleting listing:', error);
     }
@@ -833,15 +1206,21 @@ export function AppProvider({ children }: AppProviderProps) {
     try {
       const response = await ApiService.renewListing(listingId);
       const renewedListing = { ...response.listing, id: response.listing.id };
+      
+      // 🚀 SMART UPDATE: Update listing in user listings
       dispatch({ type: 'UPDATE_LISTING', payload: renewedListing });
       
-      // Reload user data to ensure everything is in sync
-      if (state.currentUser) {
-        await loadUserData(state.currentUser.id);
+      // 📋 SMART UPDATE: Update in all listings if we have them loaded
+      if (state.allListings.length > 0) {
+        const updatedAllListings = state.allListings.map(l => 
+          l.id === renewedListing.id ? renewedListing : l
+        );
+        dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
+        console.log('📋 Listing renewed in marketplace');
       }
       
-      // Also refresh all listings to show updated renewal time
-      await loadAllListings(true);
+      console.log('✅ Listing renewed with smart updates - no API refresh needed');
+      
     } catch (error) {
       console.error('Error renewing listing:', error);
     }
@@ -894,10 +1273,17 @@ export function AppProvider({ children }: AppProviderProps) {
 
   const sendMessage = async (messageData: Omit<Message, 'id' | 'timestamp' | 'read'>) => {
     try {
+      console.log('📤 Sending message:', {
+        senderId: messageData.senderId,
+        receiverId: messageData.receiverId,
+        content: messageData.content.substring(0, 50)
+      });
+      
       const newMessage = await ApiService.sendMessage(messageData);
       
-      // Immediately add the message to state
-      dispatch({ type: 'ADD_MESSAGE', payload: newMessage });
+      // 🔗 DON'T ADD LOCALLY - WebSocket will handle this automatically
+      // The backend will broadcast MESSAGE_RECEIVED which will update the UI
+      console.log('✅ Message sent, WebSocket will update UI automatically');
       
       // Ensure both sender and receiver users are loaded
       const userIdsToLoad = [messageData.senderId, messageData.receiverId].filter(id => 
@@ -926,14 +1312,6 @@ export function AppProvider({ children }: AppProviderProps) {
         }
       }
       
-      // Update conversation in real-time
-      const conversationId = [messageData.senderId, messageData.receiverId].sort().join('-');
-      dispatch({ type: 'UPDATE_CONVERSATION', payload: {
-        conversationId,
-        lastMessage: newMessage,
-        updatedAt: new Date().toISOString(),
-      } });
-      
     } catch (error) {
       console.error('Error sending message:', error);
     }
@@ -944,7 +1322,30 @@ export function AppProvider({ children }: AppProviderProps) {
     
     try {
       await ApiService.markMessagesAsRead(conversationId);
-      await loadUserMessages();
+      
+      // 🚀 SMART UPDATE: Mark messages as read in local state instead of reloading
+      const updatedMessages = state.messages.map(msg => {
+        const senderId = typeof msg.senderId === 'object' ? (msg.senderId as any).id : msg.senderId;
+        const receiverId = typeof msg.receiverId === 'object' ? (msg.receiverId as any).id : msg.receiverId;
+        const msgConversationId = [senderId, receiverId].sort().join('-');
+        
+        // Mark as read if it's in this conversation and current user is receiver
+        if (msgConversationId === conversationId && receiverId === state.currentUser?.id) {
+          return { ...msg, read: true };
+        }
+        return msg;
+      });
+      
+      // Update conversations to reset unread count
+      const updatedConversations = state.conversations.map(conv => 
+        conv.id === conversationId ? { ...conv, unreadCount: 0 } : conv
+      );
+      
+      dispatch({ type: 'SET_MESSAGES', payload: updatedMessages });
+      dispatch({ type: 'SET_CONVERSATIONS', payload: updatedConversations });
+      
+      console.log('✅ Messages marked as read with smart updates - no reload needed');
+      
     } catch (error) {
       console.error('Error marking messages as read:', error);
     }
@@ -1022,7 +1423,14 @@ export function AppProvider({ children }: AppProviderProps) {
 
   // Load messages only when messages tab is accessed
   const loadMessagesOnTabSwitch = async () => {
+    // 🚫 PREVENT DUPLICATE LOADS: Check if messages are already loading
+    if (loadingStates.messages) {
+      console.log('⚠️ Messages already loading, skipping duplicate load');
+      return;
+    }
+    
     try {
+      setLoadingStates(prev => ({ ...prev, messages: true }));
       console.log('🔄 Loading messages for messages tab...');
       
       // Load both messages and conversations
@@ -1141,6 +1549,8 @@ export function AppProvider({ children }: AppProviderProps) {
       
     } catch (error) {
       console.error('❌ Error loading messages:', error);
+    } finally {
+      setLoadingStates(prev => ({ ...prev, messages: false }));
     }
   };
 
@@ -1152,7 +1562,36 @@ export function AppProvider({ children }: AppProviderProps) {
       const mongoTrade = newTrade as any;
       const tradeWithId = { ...newTrade, id: mongoTrade._id || newTrade.id };
       
+      // 🚗 SMART UPDATE: Mark vehicles as in-trade
+      const allVehicleIds = [
+        ...tradeData.offererVehicleIds,
+        ...(tradeData.receiverVehicleIds || [])
+      ];
+      
+      if (allVehicleIds.length > 0) {
+        updateVehicleTradeStatus(allVehicleIds, true, tradeWithId.id);
+        console.log('🔒 Marked vehicles as in-trade:', allVehicleIds);
+      }
+      
+      // 📋 SMART UPDATE: Hide vehicles from listings if they're listed
+      const affectedListings = state.allListings.filter(listing => 
+        allVehicleIds.includes(listing.vehicleId)
+      );
+      
+      if (affectedListings.length > 0) {
+        const updatedAllListings = state.allListings.map(listing => {
+          if (allVehicleIds.includes(listing.vehicleId)) {
+            return { ...listing, isActive: false, inTrade: true };
+          }
+          return listing;
+        });
+        dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
+        console.log('🙈 Hidden vehicles from marketplace during trade');
+      }
+      
       dispatch({ type: 'ADD_TRADE', payload: tradeWithId });
+      console.log('✅ Trade created with smart vehicle status updates');
+      
     } catch (error) {
       console.error('❌ Error adding trade:', error);
       throw error; // Re-throw so the calling component can handle it
@@ -1173,24 +1612,127 @@ export function AppProvider({ children }: AppProviderProps) {
         updatedTradeData = tradeOrId;
       }
       
-      // If trade is being cancelled, it gets deleted on the backend
-      if (updatedTradeData.status === 'cancelled') {
+      // Get the current trade from state
+      const currentTrade = state.trades.find(t => t.id === tradeId);
+      if (!currentTrade) {
+        throw new Error('Trade not found in state');
+      }
+      
+      // Handle different trade status updates
+      if (updatedTradeData.status === 'cancelled' || updatedTradeData.status === 'rejected' || updatedTradeData.status === 'declined') {
+        // 🔓 RELEASE VEHICLES: Mark vehicles as no longer in trade
+        const allVehicleIds = [
+          ...currentTrade.offererVehicleIds,
+          ...(currentTrade.receiverVehicleIds || [])
+        ];
+        
+        updateVehicleTradeStatus(allVehicleIds, false);
+        
+        // 📋 RESTORE LISTINGS: Re-show vehicles in marketplace
+        if (state.allListings.length > 0) {
+          const updatedAllListings = state.allListings.map(listing => {
+            if (allVehicleIds.includes(listing.vehicleId)) {
+              return { ...listing, isActive: true, inTrade: false };
+            }
+            return listing;
+          });
+          dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
+          console.log('👁️ Restored vehicles to marketplace after trade cancellation');
+        }
+        
         const result = await ApiService.updateTrade(tradeId, updatedTradeData);
-        // Remove the cancelled trade from state since backend deletes it
+        // Remove the cancelled/rejected trade from state since backend deletes it
         dispatch({ type: 'SET_TRADES', payload: state.trades.filter(t => t.id !== tradeId) });
-        console.log('✅ Cancelled trade removed from state');
+        console.log('✅ Trade cancelled/rejected and vehicles released');
+        
+      } else if (updatedTradeData.status === 'completed') {
+        // 🔄 COMPLETE TRADE: Handle car swapping
+        console.log('🔄 Completing trade with car swapping...');
+        
+        const result = await ApiService.updateTrade(tradeId, updatedTradeData);
+        const completedTrade = result as Trade;
+        
+        // 🚗 CAR SWAPPING: Transfer vehicle ownership
+        const offererVehicleIds = currentTrade.offererVehicleIds;
+        const receiverVehicleIds = currentTrade.receiverVehicleIds || [];
+        
+        // Update vehicle ownership in local state
+        const updatedVehicles = state.vehicles.map(vehicle => {
+          if (offererVehicleIds.includes(vehicle.id)) {
+            // Transfer offerer's vehicles to receiver
+            return {
+              ...vehicle,
+              ownerId: currentTrade.receiverUserId,
+              inTrade: false,
+              tradeId: undefined,
+              isListed: false, // Remove from listings
+              listingId: undefined,
+              updatedAt: new Date().toISOString()
+            };
+          } else if (receiverVehicleIds.includes(vehicle.id)) {
+            // Transfer receiver's vehicles to offerer
+            return {
+              ...vehicle,
+              ownerId: currentTrade.offererUserId,
+              inTrade: false,
+              tradeId: undefined,
+              isListed: false, // Remove from listings
+              listingId: undefined,
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return vehicle;
+        });
+        
+        dispatch({ type: 'SET_VEHICLES', payload: updatedVehicles });
+        
+        // 📋 REMOVE FROM LISTINGS: Remove traded vehicles from all listings
+        if (state.allListings.length > 0) {
+          const allTradedVehicleIds = [...offererVehicleIds, ...receiverVehicleIds];
+          const updatedAllListings = state.allListings.filter(listing => 
+            !allTradedVehicleIds.includes(listing.vehicleId)
+          );
+          dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
+          console.log('📋 Removed traded vehicles from marketplace');
+        }
+        
+        // Remove user's own listings for traded vehicles
+        if (state.listings.length > 0) {
+          const allTradedVehicleIds = [...offererVehicleIds, ...receiverVehicleIds];
+          const updatedUserListings = state.listings.filter(listing => 
+            !allTradedVehicleIds.includes(listing.vehicleId)
+          );
+          dispatch({ type: 'SET_LISTINGS', payload: updatedUserListings });
+          console.log('📋 Removed traded vehicles from user listings');
+        }
+        
+        // Update trade status
+        dispatch({ type: 'UPDATE_TRADE', payload: completedTrade });
+        
+        // 🔄 REFRESH USER DATA: Reload both users' data to ensure consistency
+        try {
+          if (state.currentUser?.id === currentTrade.offererUserId || state.currentUser?.id === currentTrade.receiverUserId) {
+            console.log('🔄 Refreshing current user data after trade completion...');
+            // Reload garage data for current user
+            const vehicles = await ApiService.getUserVehicles();
+            const vehiclesWithId = vehicles.map((v: any) => ({ ...v, id: v._id || v.id }));
+            dispatch({ type: 'SET_VEHICLES', payload: vehiclesWithId });
+          }
+        } catch (error) {
+          console.error('❌ Error refreshing user data after trade:', error);
+        }
+        
+        console.log('✅ Trade completed successfully with car swapping');
+        
       } else {
+        // Regular trade update (countering, accepting, etc.)
         const trade = await ApiService.updateTrade(tradeId, updatedTradeData);
         dispatch({ type: 'UPDATE_TRADE', payload: trade });
-        
-        // If trade is completed, reload listings to remove sold listing
-        if (updatedTradeData.status === 'completed') {
-          console.log('🔄 Trade completed, reloading listings to update sold status');
-          await loadAllListings(true); // Force refresh
-        }
+        console.log('✅ Trade updated successfully');
       }
+      
     } catch (error) {
-      console.error('Error updating trade:', error);
+      console.error('❌ Error updating trade:', error);
       throw error; // Re-throw so the calling component can handle it
     }
   };
@@ -1241,6 +1783,42 @@ export function AppProvider({ children }: AppProviderProps) {
     }
   };
 
+  // Helper functions for trade state management
+  const isVehicleInPendingTrade = (vehicleId: string): boolean => {
+    return state.trades.some(trade => 
+      (trade.status === 'pending' || trade.status === 'countered' || trade.status === 'pending_acceptance') &&
+      (trade.offererVehicleIds.includes(vehicleId) || trade.receiverVehicleIds?.includes(vehicleId))
+    );
+  };
+
+  const getVehicleTradeStatus = (vehicleId: string): { inTrade: boolean; tradeId?: string; tradeStatus?: string } => {
+    const trade = state.trades.find(trade => 
+      (trade.status === 'pending' || trade.status === 'countered' || trade.status === 'pending_acceptance') &&
+      (trade.offererVehicleIds.includes(vehicleId) || trade.receiverVehicleIds?.includes(vehicleId))
+    );
+    
+    return {
+      inTrade: !!trade,
+      tradeId: trade?.id,
+      tradeStatus: trade?.status
+    };
+  };
+
+  const updateVehicleTradeStatus = (vehicleIds: string[], inTrade: boolean, tradeId?: string) => {
+    const updatedVehicles = state.vehicles.map(vehicle => {
+      if (vehicleIds.includes(vehicle.id)) {
+        return {
+          ...vehicle,
+          inTrade,
+          tradeId: inTrade ? tradeId : undefined,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return vehicle;
+    });
+    dispatch({ type: 'SET_VEHICLES', payload: updatedVehicles });
+  };
+
   // Memoize the context value to prevent unnecessary re-renders
   const contextValue = useMemo(() => ({
     state,
@@ -1276,15 +1854,6 @@ export function AppProvider({ children }: AppProviderProps) {
     renewListing,
     incrementListingViews,
     loadAllListings,
-    getListingsCount: async () => {
-      try {
-        const result = await ApiService.getAllListingsCount();
-        return result.count;
-      } catch (error) {
-        console.error('Error getting listings count:', error);
-        return 0;
-      }
-    },
     addReview,
     getUserProfile,
     sendMessage,
@@ -1299,6 +1868,143 @@ export function AppProvider({ children }: AppProviderProps) {
     reloadTrades,
     loadUserMessages,
     loadMessagesOnTabSwitch,
+    loadGarageData: async () => {
+      if (!state.currentUser || loadingStates.userData) {
+        return;
+      }
+      
+      setLoadingStates(prev => ({ ...prev, userData: true }));
+      
+      try {
+        console.log('🚗 Loading garage data...');
+        const vehicles = await ApiService.getUserVehicles();
+        const vehiclesWithId = vehicles.map((v: any) => ({ ...v, id: v._id || v.id }));
+        dispatch({ type: 'SET_VEHICLES', payload: vehiclesWithId });
+        console.log('✅ Garage data loaded');
+      } catch (error) {
+        console.error('❌ Error loading garage data:', error);
+      } finally {
+        setLoadingStates(prev => ({ ...prev, userData: false }));
+      }
+    },
+    loadTradesData: async () => {
+      if (!state.currentUser || loadingStates.userData) {
+        return;
+      }
+      
+      setLoadingStates(prev => ({ ...prev, userData: true }));
+      
+      try {
+        console.log('🔄 Loading trades data...');
+        const trades = await ApiService.getUserTrades();
+        
+        // Extract users from populated trade objects
+        const usersFromTrades: any[] = [];
+        const userIds = new Set<string>();
+        
+        const tradesWithId = trades.map((t: any) => {
+          const trade = { ...t, id: t._id || t.id };
+          
+          // Handle populated vehicle arrays
+          if (trade.offererVehicleIds && Array.isArray(trade.offererVehicleIds)) {
+            trade.offererVehicleObjects = trade.offererVehicleIds.filter((v: any) => 
+              typeof v === 'object' && v.make
+            ).map((v: any) => ({ ...v, id: v._id || v.id }));
+            
+            trade.offererVehicleIds = trade.offererVehicleIds.map((v: any) => 
+              typeof v === 'object' ? (v._id || v.id) : v
+            );
+          }
+          
+          if (trade.receiverVehicleIds && Array.isArray(trade.receiverVehicleIds)) {
+            trade.receiverVehicleObjects = trade.receiverVehicleIds.filter((v: any) => 
+              typeof v === 'object' && v.make
+            ).map((v: any) => ({ ...v, id: v._id || v.id }));
+            
+            trade.receiverVehicleIds = trade.receiverVehicleIds.map((v: any) => 
+              typeof v === 'object' ? (v._id || v.id) : v
+            );
+          }
+          
+          // Handle populated user objects
+          if (trade.offererUserId && typeof trade.offererUserId === 'object') {
+            const offererUser = { ...trade.offererUserId, id: trade.offererUserId._id || trade.offererUserId.id };
+            usersFromTrades.push(offererUser);
+            userIds.add(offererUser.id);
+            trade.offererUserId = offererUser.id;
+          } else if (typeof trade.offererUserId === 'string') {
+            userIds.add(trade.offererUserId);
+          }
+          
+          if (trade.receiverUserId && typeof trade.receiverUserId === 'object') {
+            const receiverUser = { ...trade.receiverUserId, id: trade.receiverUserId._id || trade.receiverUserId.id };
+            usersFromTrades.push(receiverUser);
+            userIds.add(receiverUser.id);
+            trade.receiverUserId = receiverUser.id;
+          } else if (typeof trade.receiverUserId === 'string') {
+            userIds.add(trade.receiverUserId);
+          }
+          
+          if (trade.listingId && typeof trade.listingId === 'object') {
+            trade.listingId = trade.listingId._id || trade.listingId.id;
+          }
+          
+          return trade;
+        });
+
+        dispatch({ type: 'SET_TRADES', payload: tradesWithId });
+        
+        // Add extracted users to state
+        let allUsers = [...state.users];
+        usersFromTrades.forEach(user => {
+          if (!allUsers.find(u => u.id === user.id)) {
+            allUsers.push(user);
+          }
+        });
+        
+        // Load missing users
+        const missingUserIds = Array.from(userIds).filter(id => 
+          !allUsers.find(u => u.id === id)
+        );
+        
+        if (missingUserIds.length > 0) {
+          const users = await ApiService.getUsersBatch(missingUserIds);
+          users.forEach(user => {
+            if (!allUsers.find(u => u.id === user.id)) {
+              allUsers.push(user);
+            }
+          });
+        }
+        
+        dispatch({ type: 'SET_USERS', payload: allUsers });
+        console.log('✅ Trades data loaded');
+      } catch (error) {
+        console.error('❌ Error loading trades data:', error);
+      } finally {
+        setLoadingStates(prev => ({ ...prev, userData: false }));
+      }
+    },
+    loadListingsData: async () => {
+      if (!state.currentUser || loadingStates.userData) {
+        return;
+      }
+      
+      setLoadingStates(prev => ({ ...prev, userData: true }));
+      
+      try {
+        console.log('📋 Loading listings data...');
+        const listings = await ApiService.getUserListings();
+        const listingsWithId = listings.map((l: any) => ({ ...l, id: l._id || l.id }));
+        dispatch({ type: 'SET_LISTINGS', payload: listingsWithId });
+        console.log('✅ Listings data loaded');
+      } catch (error) {
+        console.error('❌ Error loading listings data:', error);
+      } finally {
+        setLoadingStates(prev => ({ ...prev, userData: false }));
+      }
+    },
+    isVehicleInPendingTrade,
+    getVehicleTradeStatus,
   }), [state, dispatch, login, logout, updateUser, addVehicle, updateVehicle, deleteVehicle, addListing, updateListing, deleteListing, renewListing, incrementListingViews, loadAllListings, addReview, getUserProfile, sendMessage, markMessagesAsRead, addTrade, updateTrade, deleteTrade, cleanupCorruptedTrades, cleanupVehicleFlags, activeTab, setActiveTab, reloadTrades, loadUserMessages, loadMessagesOnTabSwitch]);
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>;

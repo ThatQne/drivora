@@ -19,7 +19,6 @@ const listingSchema = new mongoose.Schema({
   },
   description: {
     type: String,
-    required: true,
     trim: true,
     maxlength: 2000
   },

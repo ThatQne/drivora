@@ -260,7 +260,7 @@ class ApiService {
   static async createListing(listingData: {
     vehicleId: string;
     title: string;
-    description: string;
+    description?: string;
     price: number;
     problems?: string[];
     additionalFeatures?: string[];
@@ -274,7 +274,7 @@ class ApiService {
 
   static async updateListing(listingId: string, listingData: Partial<{
     title: string;
-    description: string;
+    description?: string;
     price: number;
     problems: string[];
     additionalFeatures: string[];

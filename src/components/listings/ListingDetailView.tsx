@@ -216,12 +216,14 @@ export function ListingDetailView({ listing, vehicle, seller, onClose, onContact
           {/* Right Column - Details and Actions */}
           <div className="space-y-6">
             {/* Description */}
-            <div className="glass-effect rounded-xl p-4">
-              <h3 className="text-lg font-semibold text-primary-100 mb-3">Description</h3>
-              <p className="text-primary-300 leading-relaxed whitespace-pre-wrap">
-                {listing.description}
-              </p>
-            </div>
+            {listing.description && (
+              <div className="glass-effect rounded-xl p-4">
+                <h3 className="text-lg font-semibold text-primary-100 mb-3">Description</h3>
+                <p className="text-primary-300 leading-relaxed whitespace-pre-wrap">
+                  {listing.description}
+                </p>
+              </div>
+            )}
 
             {/* Tags */}
             {listing.tags && listing.tags.length > 0 && (
