@@ -579,6 +579,19 @@ export function AppProvider({ children }: AppProviderProps) {
           onConnectionChange: (connected) => {
             console.log(connected ? '✅ WebSocket connected' : '❌ WebSocket disconnected');
             // You could show a connection status indicator in the UI
+          },
+
+          // ⌨️ TYPING INDICATORS
+          onTypingStart: (userId, conversationId) => {
+            console.log('⌨️ User started typing:', userId, 'in conversation:', conversationId);
+            // This could be handled by the MessagesView component directly
+            // by listening to WebSocket events, but we could also dispatch
+            // a state update here if needed
+          },
+
+          onTypingStop: (userId, conversationId) => {
+            console.log('⌨️ User stopped typing:', userId, 'in conversation:', conversationId);
+            // This could be handled by the MessagesView component directly
           }
         });
       }

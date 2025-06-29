@@ -17,6 +17,7 @@ import {
 import { useApp } from '../../context/AppContext.tsx';
 import { Message, User as UserType, Conversation } from '../../types/index.ts';
 import ApiService from '../../services/apiService.ts';
+import webSocketService from '../../services/webSocketService.ts';
 
 interface TypingIndicator {
   userId: string;
@@ -263,6 +264,42 @@ export function MessagesView() {
     return () => clearInterval(interval);
   }, []);
 
+  // Set up WebSocket typing indicator listeners
+  useEffect(() => {
+    const handleTypingStart = (userId: string, conversationId: string) => {
+      if (userId !== state.currentUser?.id) {
+        setTypingUsers(prev => {
+          // Remove any existing typing indicator for this user
+          const filtered = prev.filter(t => t.userId !== userId || t.conversationId !== conversationId);
+          // Add new typing indicator
+          return [...filtered, { userId, conversationId, timestamp: Date.now() }];
+        });
+      }
+    };
+
+    const handleTypingStop = (userId: string, conversationId: string) => {
+      if (userId !== state.currentUser?.id) {
+        setTypingUsers(prev => 
+          prev.filter(t => !(t.userId === userId && t.conversationId === conversationId))
+        );
+      }
+    };
+
+    // Set up WebSocket callbacks for typing indicators
+    webSocketService.setCallbacks({
+      onTypingStart: handleTypingStart,
+      onTypingStop: handleTypingStop
+    });
+
+    return () => {
+      // Clean up callbacks when component unmounts
+      webSocketService.setCallbacks({
+        onTypingStart: undefined,
+        onTypingStop: undefined
+      });
+    };
+  }, [state.currentUser?.id]);
+
   // Handle real-time conversation updates
   useEffect(() => {
     console.log('📞 Conversations updated in MessagesView:', {
@@ -455,11 +492,12 @@ export function MessagesView() {
   // }, [selectedConversation, checkForNewMessages]);
 
   const handleSendMessage = async () => {
-    if (!messageText.trim() || !selectedConversationUser || loading) return;
+    if (!messageText.trim() || !selectedConversationUser) return;
 
+    const messageContent = messageText.trim();
     const tempMessage: PendingMessage = {
       id: `temp-${Date.now()}`,
-      content: messageText.trim(),
+      content: messageContent,
       timestamp: new Date().toISOString(),
       senderId: state.currentUser!.id,
       receiverId: selectedConversationUser.id,
@@ -477,20 +515,22 @@ export function MessagesView() {
 
     // Add to pending messages immediately
     setPendingMessages(prev => [...prev, tempMessage]);
+    
+    // Clear input and reset immediately to allow new messages
     setMessageText('');
     setIsTyping(false);
 
-    // Auto-resize textarea back to single line
+    // Auto-resize textarea back to single line and keep focus
     if (textareaRef.current) {
       textareaRef.current.style.height = '48px';
+      textareaRef.current.focus();
     }
 
-    setLoading(true);
     try {
       await sendMessage({
         senderId: state.currentUser!.id,
         receiverId: selectedConversationUser.id,
-        content: tempMessage.content
+        content: messageContent
       });
       
       console.log('✅ Message sent successfully, removing from pending');
@@ -518,8 +558,6 @@ export function MessagesView() {
             : msg
         )
       );
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -527,6 +565,12 @@ export function MessagesView() {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSendMessage();
+      // Ensure focus is maintained after Enter key
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+        }
+      }, 0);
     }
   };
 
@@ -539,9 +583,13 @@ export function MessagesView() {
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
     }
     
-    if (value.trim() && !isTyping) {
+    if (value.trim() && !isTyping && selectedConversation) {
       setIsTyping(true);
-      // In a real app, you'd emit typing indicator to other users via WebSocket
+      
+      // Emit typing indicator via WebSocket
+      if (webSocketService.isConnectedToServer()) {
+        webSocketService.sendTypingStart(selectedConversation);
+      }
     }
 
     // Clear typing indicator after 2 seconds of no typing
@@ -551,6 +599,11 @@ export function MessagesView() {
     
     typingTimeoutRef.current = setTimeout(() => {
       setIsTyping(false);
+      
+      // Stop typing indicator via WebSocket
+      if (webSocketService.isConnectedToServer() && selectedConversation) {
+        webSocketService.sendTypingStop(selectedConversation);
+      }
     }, 2000);
   };
 
@@ -580,6 +633,13 @@ export function MessagesView() {
     setTimeout(() => {
       scrollToBottom(true);
     }, 100);
+    
+    // Focus the input field after selecting conversation
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+      }
+    }, 200);
     
     // Mark messages as read
     if (conversation && conversation.unreadCount > 0) {
@@ -903,14 +963,13 @@ export function MessagesView() {
                   lineHeight: '1.5'
                 }}
                 rows={1}
-                disabled={loading}
               />
             </div>
             <button
               onClick={handleSendMessage}
-              disabled={!messageText.trim() || loading}
-              className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
-                messageText.trim() && !loading
+              disabled={!messageText.trim()}
+              className={`w-12 h-[50px] rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
+                messageText.trim()
                   ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg hover:shadow-xl'
                   : 'bg-primary-700/50 text-primary-400 cursor-not-allowed'
               }`}
