@@ -2,7 +2,8 @@ interface WebSocketMessage {
   type: 'LISTING_ADDED' | 'LISTING_UPDATED' | 'LISTING_DELETED' | 
         'TRADE_CREATED' | 'TRADE_UPDATED' | 'TRADE_COMPLETED' | 
         'MESSAGE_RECEIVED' | 'VEHICLE_ADDED' | 'VEHICLE_UPDATED' | 
-        'USER_ONLINE' | 'USER_OFFLINE' | 'TYPING_START' | 'TYPING_STOP';
+        'USER_ONLINE' | 'USER_OFFLINE' | 'TYPING_START' | 'TYPING_STOP' |
+        'PING' | 'PONG';
   data: any;
   userId?: string;
   targetUserId?: string;
@@ -86,6 +87,13 @@ class WebSocketService {
 
       // Handle different message types
       switch (message.type) {
+        case 'PING':
+          this.ws?.send(JSON.stringify({ type: 'PONG', timestamp: new Date().toISOString() }));
+          break;
+        case 'PONG':
+          // Handle PONG response from server (heartbeat acknowledgment)
+          console.log('💓 Received PONG from server');
+          break;
         case 'LISTING_ADDED':
           this.callbacks.onListingAdded?.(message.data);
           break;

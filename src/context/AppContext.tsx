@@ -50,6 +50,7 @@ interface AppContextType {
   loadGarageData: () => Promise<void>;
   loadTradesData: () => Promise<void>;
   loadListingsData: () => Promise<void>;
+  checkForNewMessages: () => Promise<void>;
   // Trade helper functions
   isVehicleInPendingTrade: (vehicleId: string) => boolean;
   getVehicleTradeStatus: (vehicleId: string) => { inTrade: boolean; tradeId?: string; tradeStatus?: string };
@@ -310,11 +311,10 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case 'SET_USERS':
       return { ...state, users: action.payload };
     case 'SET_ALL_LISTINGS':
-      // Ensure we don't lose any local listings that might not be in the payload
-      const existingLocalListings = state.listings.filter(l => !action.payload.find(p => p.id === l.id));
-      return { 
-        ...state, 
-        allListings: [...action.payload, ...existingLocalListings]
+      console.log('🔄 SET_ALL_LISTINGS reducer - current count:', state.allListings.length, 'new count:', action.payload.length);
+      return {
+        ...state,
+        allListings: action.payload
       };
     default:
       return state;
@@ -361,17 +361,34 @@ export function AppProvider({ children }: AppProviderProps) {
           // 📋 LISTING UPDATES
           onListingAdded: (listing) => {
             console.log('📋 Real-time: New listing added:', listing.title);
+            console.log('📋 Listing seller ID:', listing.sellerId, 'Current user ID:', stateRef.current.currentUser?.id);
+            console.log('📋 Current allListings count before update:', stateRef.current.allListings.length);
+            
             const listingWithId = { ...listing, id: listing._id || listing.id };
             
+            // Check if listing already exists to prevent duplicates
+            const listingExists = stateRef.current.allListings.some(l => l.id === listingWithId.id);
+            if (listingExists) {
+              console.log('📋 Listing already exists, skipping duplicate:', listingWithId.id);
+              return;
+            }
+            
             // Always add to all listings, even if empty - use stateRef to get current state
-            dispatch({ type: 'SET_ALL_LISTINGS', payload: [...stateRef.current.allListings, listingWithId] });
+            const updatedAllListings = [...stateRef.current.allListings, listingWithId];
+            dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
+            console.log('📋 Updated allListings count after update:', updatedAllListings.length);
 
-            // Add to user's own listings if it's theirs
-            if (listing.sellerId === stateRef.current.currentUser?.id) {
+            // Add to user's own listings if it's theirs - handle both string ID and populated object
+            const sellerId = typeof listing.sellerId === 'object' ? listing.sellerId._id || listing.sellerId.id : listing.sellerId;
+            console.log('📋 Extracted seller ID:', sellerId, 'vs current user:', stateRef.current.currentUser?.id);
+            
+            if (sellerId === stateRef.current.currentUser?.id) {
+              console.log('📋 Adding to user\'s own listings');
               dispatch({ type: 'ADD_LISTING', payload: listingWithId });
               
               // Update vehicle status to mark as listed
-              const vehicle = stateRef.current.vehicles.find(v => v.id === listing.vehicleId);
+              const vehicleId = typeof listing.vehicleId === 'object' ? listing.vehicleId._id || listing.vehicleId.id : listing.vehicleId;
+              const vehicle = stateRef.current.vehicles.find(v => v.id === vehicleId);
               if (vehicle) {
                 const updatedVehicle: Vehicle = {
                   ...vehicle,
@@ -382,6 +399,8 @@ export function AppProvider({ children }: AppProviderProps) {
                 dispatch({ type: 'UPDATE_VEHICLE', payload: updatedVehicle });
                 console.log('🚗 Vehicle marked as listed in garage via WebSocket');
               }
+            } else {
+              console.log('📋 Not adding to user\'s own listings - different seller');
             }
           },
 
@@ -395,8 +414,9 @@ export function AppProvider({ children }: AppProviderProps) {
             );
             dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
 
-            // Update in user's own listings if it's theirs
-            if (listing.sellerId === stateRef.current.currentUser?.id) {
+            // Update in user's own listings if it's theirs - handle both string ID and populated object
+            const sellerId = typeof listing.sellerId === 'object' ? listing.sellerId._id || listing.sellerId.id : listing.sellerId;
+            if (sellerId === stateRef.current.currentUser?.id) {
               dispatch({ type: 'UPDATE_LISTING', payload: listingWithId });
             }
           },
@@ -1372,12 +1392,19 @@ export function AppProvider({ children }: AppProviderProps) {
       console.log('👥 Extracted user IDs from messages:', Array.from(userIds));
       console.log('👥 Current users in state:', state.users.map(u => ({ id: u.id, username: u.username })));
       
-      // Load users that aren't already in state
+      // Load users that aren't already in state (excluding current user to prevent infinite loops)
       const missingUserIds = Array.from(userIds).filter(id => 
-        !state.users.find(u => u.id === id)
+        id !== state.currentUser?.id && !state.users.find(u => u.id === id)
       );
       
-      console.log('❓ Missing user IDs:', missingUserIds);
+      console.log('❓ Missing user IDs (excluding current user):', missingUserIds);
+      
+      // Ensure current user is in users array
+      let allUsers = [...state.users];
+      if (state.currentUser && !allUsers.find(u => u.id === state.currentUser!.id)) {
+        allUsers.push(state.currentUser);
+        console.log('👤 Added current user to users array');
+      }
       
       if (missingUserIds.length > 0) {
         try {
@@ -1505,12 +1532,18 @@ export function AppProvider({ children }: AppProviderProps) {
         }
       });
       
-      // Find users that still need to be fetched (not populated and not in state)
+      // Find users that still need to be fetched (not populated and not in state, excluding current user)
       const missingUserIds = Array.from(userIds).filter(id => 
-        !allUsers.find(u => u.id === id)
+        id !== state.currentUser?.id && !allUsers.find(u => u.id === id)
       );
       
-      console.log('❓ Missing user IDs after adding populated users:', missingUserIds);
+      console.log('❓ Missing user IDs after adding populated users (excluding current user):', missingUserIds);
+      
+      // Ensure current user is in users array
+      if (state.currentUser && !allUsers.find(u => u.id === state.currentUser.id)) {
+        allUsers.push(state.currentUser);
+        console.log('👤 Added current user to users array');
+      }
       
       if (missingUserIds.length > 0) {
         try {
@@ -1808,6 +1841,22 @@ export function AppProvider({ children }: AppProviderProps) {
     dispatch({ type: 'SET_VEHICLES', payload: updatedVehicles });
   };
 
+  const checkForNewMessages = async () => {
+    // Prevent infinite loops by checking if messages are already loading
+    if (loadingStates.messages) {
+      console.log('⚠️ Messages already loading, skipping checkForNewMessages');
+      return;
+    }
+    
+    try {
+      console.log('🔄 Checking for new messages...');
+      // Simply reload messages - this is what the function should do based on usage
+      await loadUserMessages();
+    } catch (error) {
+      console.error('❌ Error checking for new messages:', error);
+    }
+  };
+
   // Memoize the context value to prevent unnecessary re-renders
   const contextValue = useMemo(() => ({
     state,
@@ -1992,9 +2041,10 @@ export function AppProvider({ children }: AppProviderProps) {
         setLoadingStates(prev => ({ ...prev, userData: false }));
       }
     },
+    checkForNewMessages,
     isVehicleInPendingTrade,
     getVehicleTradeStatus,
-  }), [state, dispatch, login, logout, updateUser, addVehicle, updateVehicle, deleteVehicle, addListing, updateListing, deleteListing, renewListing, incrementListingViews, loadAllListings, addReview, getUserProfile, sendMessage, markMessagesAsRead, addTrade, updateTrade, deleteTrade, cleanupCorruptedTrades, cleanupVehicleFlags, activeTab, setActiveTab, reloadTrades, loadUserMessages, loadMessagesOnTabSwitch]);
+  }), [state, dispatch, login, logout, updateUser, addVehicle, updateVehicle, deleteVehicle, addListing, updateListing, deleteListing, renewListing, incrementListingViews, loadAllListings, addReview, getUserProfile, sendMessage, markMessagesAsRead, addTrade, updateTrade, deleteTrade, cleanupCorruptedTrades, cleanupVehicleFlags, activeTab, setActiveTab, reloadTrades, loadUserMessages, loadMessagesOnTabSwitch, checkForNewMessages]);
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>;
 }

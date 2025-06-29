@@ -49,40 +49,70 @@ export function ListingsView() {
 
   // Memoize listings processing to avoid re-computation on every render
   const listingsWithVehicles = useMemo(() => {
+    console.log('🔄 Processing', state.allListings.length, 'listings');
+    
     const result = state.allListings
       .filter(listing => listing.isActive)
       .map(listing => {
-        // First try to use populated vehicle data from backend
+        // Handle vehicle data - could be populated object or ID
         let vehicle = (listing as any).vehicle;
         
-        // If not populated, try to find vehicle in local state
         if (!vehicle) {
-          vehicle = state.vehicles.find(v => v.id === listing.vehicleId);
+          // Check if vehicleId is a populated object (from WebSocket)
+          if (typeof listing.vehicleId === 'object' && listing.vehicleId !== null) {
+            const vehicleObj = listing.vehicleId as any;
+            vehicle = {
+              ...vehicleObj,
+              id: vehicleObj._id || vehicleObj.id
+            };
+          } else {
+            // Try to find vehicle in local state using ID
+            vehicle = state.vehicles.find(v => v.id === listing.vehicleId);
+          }
         }
         
-        // First try to use populated seller data from backend
+        // Handle seller data - could be populated object or ID
         let seller = (listing as any).seller;
         
-        // If not populated, try to find seller in users or use current user as fallback
         if (!seller) {
-          seller = state.users.find(u => u.id === listing.sellerId) || state.currentUser || {
-            id: listing.sellerId,
-            username: 'Unknown User',
-            email: 'contact@example.com',
-            password: '',
-            createdAt: new Date().toISOString(),
-            location: 'Location not specified'
-          };
+          // Check if sellerId is a populated object (from WebSocket)
+          if (typeof listing.sellerId === 'object' && listing.sellerId !== null) {
+            const sellerObj = listing.sellerId as any;
+            seller = {
+              ...sellerObj,
+              id: sellerObj._id || sellerObj.id
+            };
+          } else {
+            // Try to find seller in users or use current user as fallback
+            seller = state.users.find(u => u.id === listing.sellerId) || state.currentUser || {
+              id: listing.sellerId,
+              username: 'Unknown User',
+              email: 'contact@example.com',
+              password: '',
+              createdAt: new Date().toISOString(),
+              location: 'Location not specified'
+            };
+          }
         }
         
-        return {
+        const processedListing = {
           ...listing,
           vehicle,
           seller
         };
+        
+        console.log('🔄 Processed listing:', listing.title, 'vehicle:', !!vehicle, 'seller:', !!seller);
+        return processedListing;
       })
-      .filter(item => item.vehicle && item.seller); // Only include listings with valid vehicles and sellers
+      .filter(item => {
+        const hasValidData = item.vehicle && item.seller;
+        if (!hasValidData) {
+          console.log('❌ Filtering out listing due to missing data:', item.title, 'vehicle:', !!item.vehicle, 'seller:', !!item.seller);
+        }
+        return hasValidData;
+      });
 
+    console.log('🔄 Final processed listings:', result.length, 'out of', state.allListings.length);
     return result;
   }, [state.allListings, state.vehicles, state.users, state.currentUser]);
 

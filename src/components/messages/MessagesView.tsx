@@ -337,15 +337,16 @@ export function MessagesView() {
 
   // Set up automatic message checking when component mounts
   useEffect(() => {
-    console.log('📱 MessagesView mounted, setting up automatic message checking');
+    console.log('📱 MessagesView mounted');
     
-    // Check for new messages immediately
-    checkForNewMessages();
+    // DISABLED: Automatic checking causes infinite loops
+    // WebSocket handles real-time message updates instead
+    // checkForNewMessages();
     
-    // Set up interval to check for new messages every 10 seconds when in messages view
-    messageCheckIntervalRef.current = setInterval(() => {
-      checkForNewMessages();
-    }, 10000);
+    // DISABLED: Interval checking not needed with WebSocket
+    // messageCheckIntervalRef.current = setInterval(() => {
+    //   checkForNewMessages();
+    // }, 10000);
     
     // Cleanup on unmount
     return () => {
@@ -353,33 +354,34 @@ export function MessagesView() {
         clearInterval(messageCheckIntervalRef.current);
       }
     };
-  }, [checkForNewMessages]);
+  }, []);
 
-  // Check for new messages more frequently when actively in a conversation
-  useEffect(() => {
-    if (selectedConversation) {
-      console.log('💬 Active conversation selected, increasing message check frequency');
-      
-      // Clear existing interval
-      if (messageCheckIntervalRef.current) {
-        clearInterval(messageCheckIntervalRef.current);
-      }
-      
-      // Check more frequently (every 3 seconds) when in active conversation
-      messageCheckIntervalRef.current = setInterval(() => {
-        checkForNewMessages();
-      }, 3000);
-    } else {
-      // Reset to normal frequency when no conversation selected
-      if (messageCheckIntervalRef.current) {
-        clearInterval(messageCheckIntervalRef.current);
-      }
-      
-      messageCheckIntervalRef.current = setInterval(() => {
-        checkForNewMessages();
-      }, 10000);
-    }
-  }, [selectedConversation, checkForNewMessages]);
+  // DISABLED: Automatic checking when conversation changes
+  // WebSocket handles real-time updates instead
+  // useEffect(() => {
+  //   if (selectedConversation) {
+  //     console.log('💬 Active conversation selected, increasing message check frequency');
+  //     
+  //     // Clear existing interval
+  //     if (messageCheckIntervalRef.current) {
+  //       clearInterval(messageCheckIntervalRef.current);
+  //     }
+  //     
+  //     // Check more frequently (every 3 seconds) when in active conversation
+  //     messageCheckIntervalRef.current = setInterval(() => {
+  //       checkForNewMessages();
+  //     }, 3000);
+  //   } else {
+  //     // Reset to normal frequency when no conversation selected
+  //     if (messageCheckIntervalRef.current) {
+  //       clearInterval(messageCheckIntervalRef.current);
+  //     }
+  //     
+  //     messageCheckIntervalRef.current = setInterval(() => {
+  //       checkForNewMessages();
+  //     }, 10000);
+  //   }
+  // }, [selectedConversation, checkForNewMessages]);
 
   const handleSendMessage = async () => {
     if (!messageText.trim() || !selectedConversationUser || loading) return;

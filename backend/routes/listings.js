@@ -284,11 +284,21 @@ router.post('/', auth, async (req, res) => {
 
     // 🔗 WEBSOCKET: Broadcast new listing to all users
     if (req.app.locals.webSocket) {
+      console.log('📤 About to broadcast LISTING_ADDED event');
+      console.log('📤 Listing title:', listing.title);
+      console.log('📤 Listing seller ID:', listing.sellerId);
+      console.log('📤 Active connections:', req.app.locals.webSocket.getActiveUsers().length);
+      console.log('📤 Excluding user ID:', req.user._id);
+      
       req.app.locals.webSocket.broadcastToAll({
         type: 'LISTING_ADDED',
         data: listing,
         timestamp: new Date().toISOString()
       }, req.user._id); // Exclude the creator
+      
+      console.log('📤 LISTING_ADDED broadcast completed');
+    } else {
+      console.log('❌ WebSocket service not available');
     }
 
     res.status(201).json(listing);
