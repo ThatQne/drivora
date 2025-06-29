@@ -236,6 +236,69 @@ function appReducer(state: AppState, action: AppAction): AppState {
         updatedConversations = [...state.conversations, newConversation];
       }
       
+      // 🚨 CRITICAL FIX: Preserve conversations that might have been created from fallback logic
+      // If we have messages but only one conversation, we need to recreate other conversations from messages
+      if (state.messages.length > 0 && updatedConversations.length === 1 && state.currentUser) {
+        console.log('🔄 Recreating conversations from messages to preserve other chats');
+        const convMap = new Map<string, Conversation>();
+        
+        // Add the existing conversation to the map
+        updatedConversations.forEach(conv => {
+          convMap.set(conv.id, conv);
+        });
+        
+        // Create conversations from all messages
+        state.messages.forEach(message => {
+          const messageSenderId = typeof message.senderId === 'object' 
+            ? (message.senderId as any).id 
+            : message.senderId;
+          const messageReceiverId = typeof message.receiverId === 'object' 
+            ? (message.receiverId as any).id 
+            : message.receiverId;
+            
+          const otherUserId = messageSenderId === state.currentUser?.id 
+            ? messageReceiverId 
+            : messageSenderId;
+          
+          const msgConversationId = [state.currentUser?.id, otherUserId].sort().join('-');
+          
+          if (!convMap.has(msgConversationId)) {
+            convMap.set(msgConversationId, {
+              id: msgConversationId,
+              participants: [state.currentUser?.id!, otherUserId],
+              lastMessage: message,
+              unreadCount: 0,
+              updatedAt: message.timestamp
+            });
+          } else {
+            const existing = convMap.get(msgConversationId)!;
+            if (new Date(message.timestamp) > new Date(existing.lastMessage.timestamp)) {
+              existing.lastMessage = message;
+              existing.updatedAt = message.timestamp;
+            }
+          }
+        });
+        
+        // Calculate unread counts
+        convMap.forEach(conversation => {
+          const unreadMessages = state.messages.filter(msg => {
+            const msgSenderId = typeof msg.senderId === 'object' 
+              ? (msg.senderId as any).id 
+              : msg.senderId;
+            const msgReceiverId = typeof msg.receiverId === 'object' 
+              ? (msg.receiverId as any).id 
+              : msg.receiverId;
+              
+            return msgReceiverId === state.currentUser?.id &&
+                   !msg.read &&
+                   (msgSenderId === conversation.participants[0] || msgSenderId === conversation.participants[1]);
+          });
+          conversation.unreadCount = unreadMessages.length;
+        });
+        
+        updatedConversations = Array.from(convMap.values());
+      }
+      
       // Sort conversations by most recent activity
       updatedConversations.sort((a, b) => 
         new Date(b.updatedAt || b.lastMessage?.timestamp || 0).getTime() - 
@@ -247,7 +310,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
         conversationId,
         conversationsCount: updatedConversations.length,
         isReceiver: receiverId === state.currentUser?.id,
-        messageRead: newMessage.read
+        messageRead: newMessage.read,
+        preservedOtherConversations: updatedConversations.length > 1
       });
       
       return { 
@@ -1290,9 +1354,15 @@ export function AppProvider({ children }: AppProviderProps) {
       
       const newMessage = await ApiService.sendMessage(messageData);
       
-      // 🔗 DON'T ADD LOCALLY - WebSocket will handle this automatically
-      // The backend will broadcast MESSAGE_RECEIVED which will update the UI
-      console.log('✅ Message sent, WebSocket will update UI automatically');
+      // 🔗 WebSocket will handle UI updates automatically
+      // The backend now broadcasts MESSAGE_RECEIVED to both sender and receiver
+      console.log('✅ Message sent, WebSocket will update UI automatically for both users');
+      
+      // 🚀 FALLBACK: Add message locally immediately in case WebSocket is delayed
+      // This ensures the sender sees their message right away
+      const messageWithId = { ...newMessage, id: newMessage._id || newMessage.id };
+      dispatch({ type: 'ADD_MESSAGE', payload: messageWithId });
+      console.log('📨 Added sent message to local state as fallback');
       
       // Ensure both sender and receiver users are loaded
       const userIdsToLoad = [messageData.senderId, messageData.receiverId].filter(id => 

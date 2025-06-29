@@ -2,8 +2,7 @@ interface WebSocketMessage {
   type: 'LISTING_ADDED' | 'LISTING_UPDATED' | 'LISTING_DELETED' | 
         'TRADE_CREATED' | 'TRADE_UPDATED' | 'TRADE_COMPLETED' | 
         'MESSAGE_RECEIVED' | 'VEHICLE_ADDED' | 'VEHICLE_UPDATED' | 
-        'USER_ONLINE' | 'USER_OFFLINE' | 'TYPING_START' | 'TYPING_STOP' |
-        'PING' | 'PONG';
+        'TYPING_START' | 'TYPING_STOP' | 'PING' | 'PONG';
   data: any;
   userId?: string;
   targetUserId?: string;
@@ -20,8 +19,6 @@ interface WebSocketCallbacks {
   onMessageReceived?: (message: any) => void;
   onVehicleAdded?: (vehicle: any, userId: string) => void;
   onVehicleUpdated?: (vehicle: any, userId: string) => void;
-  onUserOnline?: (userId: string) => void;
-  onUserOffline?: (userId: string) => void;
   onTypingStart?: (userId: string, conversationId: string) => void;
   onTypingStop?: (userId: string, conversationId: string) => void;
   onConnectionChange?: (connected: boolean) => void;
@@ -113,6 +110,7 @@ class WebSocketService {
           this.callbacks.onTradeCompleted?.(message.data);
           break;
         case 'MESSAGE_RECEIVED':
+          console.log('📨 WebSocket MESSAGE_RECEIVED:', message.data);
           this.callbacks.onMessageReceived?.(message.data);
           break;
         case 'VEHICLE_ADDED':
@@ -120,12 +118,6 @@ class WebSocketService {
           break;
         case 'VEHICLE_UPDATED':
           this.callbacks.onVehicleUpdated?.(message.data, message.userId!);
-          break;
-        case 'USER_ONLINE':
-          this.callbacks.onUserOnline?.(message.data.userId);
-          break;
-        case 'USER_OFFLINE':
-          this.callbacks.onUserOffline?.(message.data.userId);
           break;
         case 'TYPING_START':
           this.callbacks.onTypingStart?.(message.data.userId, message.data.conversationId);

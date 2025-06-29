@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   MessageCircle, 
@@ -34,7 +34,7 @@ interface PendingMessage {
 }
 
 export function MessagesView() {
-  const { state, sendMessage, markMessagesAsRead, checkForNewMessages } = useApp();
+  const { state, sendMessage, markMessagesAsRead, checkForNewMessages, dispatch } = useApp();
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -82,9 +82,17 @@ export function MessagesView() {
     if (!state.messages) return [];
     
     state.messages.forEach(message => {
-      const otherUserId = message.senderId === state.currentUser?.id 
-        ? message.receiverId 
+      // Extract user IDs properly (handle both string IDs and populated objects)
+      const messageSenderId = typeof message.senderId === 'object' 
+        ? (message.senderId as any)._id || (message.senderId as any).id 
         : message.senderId;
+      const messageReceiverId = typeof message.receiverId === 'object' 
+        ? (message.receiverId as any)._id || (message.receiverId as any).id 
+        : message.receiverId;
+        
+      const otherUserId = messageSenderId === state.currentUser?.id 
+        ? messageReceiverId 
+        : messageSenderId;
       
       const conversationId = [state.currentUser?.id, otherUserId].sort().join('-');
       
@@ -107,18 +115,72 @@ export function MessagesView() {
 
     // Calculate unread counts
     convMap.forEach(conversation => {
-      const unreadMessages = state.messages.filter(msg => 
-        msg.receiverId === state.currentUser?.id &&
-        !msg.read &&
-        (msg.senderId === conversation.participants[0] || msg.senderId === conversation.participants[1])
-      );
+      const unreadMessages = state.messages.filter(msg => {
+        // Extract user IDs properly (handle both string IDs and populated objects)
+        const msgSenderId = typeof msg.senderId === 'object' 
+          ? (msg.senderId as any)._id || (msg.senderId as any).id 
+          : msg.senderId;
+        const msgReceiverId = typeof msg.receiverId === 'object' 
+          ? (msg.receiverId as any)._id || (msg.receiverId as any).id 
+          : msg.receiverId;
+          
+        return msgReceiverId === state.currentUser?.id &&
+               !msg.read &&
+               (msgSenderId === conversation.participants[0] || msgSenderId === conversation.participants[1]);
+      });
       conversation.unreadCount = unreadMessages.length;
     });
 
     return Array.from(convMap.values()).sort((a, b) => 
       new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     );
-  }, [state.conversations, state.messages, state.currentUser?.id, state.users]);
+  }, [state.conversations, state.messages, state.currentUser?.id]);
+
+  // Check if we need to load users for conversations
+  const missingUserIds = useMemo(() => {
+    if (!conversations.length) return [];
+    
+    const userIds = new Set<string>();
+    conversations.forEach(conversation => {
+      // For fallback conversations, we need to load the other user
+      if (!(conversation as any).otherUser) {
+        const otherUserId = conversation.participants.find(p => p !== state.currentUser?.id);
+        if (otherUserId && !state.users.find(u => u.id === otherUserId)) {
+          userIds.add(otherUserId);
+        }
+      }
+    });
+    
+    return Array.from(userIds);
+  }, [conversations, state.users, state.currentUser?.id]);
+
+  // Load missing users when conversations are created
+  useEffect(() => {
+    if (missingUserIds.length > 0) {
+      console.log('👥 Loading missing users for conversations:', missingUserIds);
+      const loadMissingUsers = async () => {
+        try {
+          const users = await ApiService.getUsersBatch(missingUserIds);
+          const usersWithId = users.map((u: any) => ({ ...u, id: u._id || u.id }));
+          
+          // Add new users to existing users
+          const allUsers = [...state.users];
+          usersWithId.forEach(user => {
+            if (!allUsers.find(u => u.id === user.id)) {
+              allUsers.push(user);
+            }
+          });
+          
+          dispatch({ type: 'SET_USERS', payload: allUsers });
+          console.log('✅ Loaded missing users for conversations');
+        } catch (error) {
+          console.error('❌ Error loading missing users for conversations:', error);
+        }
+      };
+      
+      loadMissingUsers();
+    }
+  }, [missingUserIds, state.users, dispatch]);
 
   // Track when messages/conversations are loaded for the first time
   useEffect(() => {
@@ -126,6 +188,17 @@ export function MessagesView() {
       setInitialLoad(false);
     }
   }, [state.messages, state.conversations]);
+
+  // Debug conversation changes
+  useEffect(() => {
+    console.log('📞 Conversations changed:', {
+      count: conversations.length,
+      conversations: conversations.map(c => ({ id: c.id, participants: c.participants })),
+      selectedConversation,
+      stateConversationsCount: state.conversations?.length || 0,
+      stateMessagesCount: state.messages?.length || 0
+    });
+  }, [conversations, selectedConversation, state.conversations, state.messages]);
 
   // Sync new messages from global state into paginated messages
   useEffect(() => {
@@ -218,20 +291,18 @@ export function MessagesView() {
   // Debug logging for conversations
   useEffect(() => {
     console.log('📞 MessagesView Debug:', {
-      conversationsCount: state.conversations?.length || 0,
+      stateConversationsCount: state.conversations?.length || 0,
+      computedConversationsCount: conversations.length,
       messagesCount: state.messages?.length || 0,
       usersCount: state.users?.length || 0,
-      conversations: state.conversations?.slice(0, 3).map(c => ({
+      usingFallback: !state.conversations || state.conversations.length === 0,
+      computedConversations: conversations.slice(0, 3).map(c => ({
         id: c.id,
         participants: c.participants,
-        otherUser: (c as any).otherUser ? {
-          id: (c as any).otherUser.id,
-          username: (c as any).otherUser.username
-        } : null,
         lastMessage: c.lastMessage?.content?.substring(0, 30)
       }))
     });
-  }, [state.conversations, state.messages, state.users]);
+  }, [state.conversations, conversations, state.messages, state.users]);
 
   // Filter conversations based on search
   const filteredConversations = useMemo(() => {
@@ -400,7 +471,8 @@ export function MessagesView() {
       senderId: tempMessage.senderId,
       receiverId: tempMessage.receiverId,
       selectedConversation,
-      conversationsCount: conversations.length
+      conversationsCount: conversations.length,
+      conversationsBeforeSend: conversations.map(c => ({ id: c.id, participants: c.participants }))
     });
 
     // Add to pending messages immediately
@@ -431,7 +503,8 @@ export function MessagesView() {
         console.log('📞 Conversations after message sent:', {
           count: conversations.length,
           selectedConversation,
-          selectedConversationData: conversations.find(c => c.id === selectedConversation)
+          selectedConversationData: conversations.find(c => c.id === selectedConversation),
+          allConversations: conversations.map(c => ({ id: c.id, participants: c.participants }))
         });
       }, 100);
 
@@ -628,17 +701,17 @@ export function MessagesView() {
 
       {/* Conversations List */}
       <div className="flex-1 overflow-y-auto">
-        {initialLoad && (!state.conversations || state.conversations.length === 0) ? (
+        {initialLoad || missingUserIds.length > 0 ? (
           <div className="p-4 text-center">
             <div className="w-12 h-12 mx-auto mb-4 relative">
               <div className="w-12 h-12 border-2 border-primary-600 border-t-blue-500 rounded-full animate-spin"></div>
             </div>
             <p className="text-primary-300">Loading conversations...</p>
             <p className="text-sm text-primary-400 mt-1">
-              Please wait while we load your messages
+              {missingUserIds.length > 0 ? 'Loading user data...' : 'Please wait while we load your messages'}
             </p>
           </div>
-        ) : !state.conversations || state.conversations.length === 0 ? (
+        ) : conversations.length === 0 ? (
           <div className="p-4 text-center">
             <MessageCircle className="w-12 h-12 mx-auto mb-4 text-primary-400" />
             <p className="text-primary-300">No conversations yet</p>
@@ -657,12 +730,35 @@ export function MessagesView() {
         ) : (
           <div className="space-y-1 p-2">
             {filteredConversations.map((conversation) => {
-              // For API conversations, use embedded otherUser data; for fallback conversations, find in state.users
-              const otherUser = (conversation as any).otherUser || (() => {
+              // Enhanced user lookup with better error handling
+              const otherUser = (() => {
+                // For API conversations, use embedded otherUser data
+                if ((conversation as any).otherUser) {
+                  return (conversation as any).otherUser;
+                }
+                
+                // For fallback conversations, find in state.users
                 const otherUserId = conversation.participants.find(p => p !== state.currentUser?.id);
-                return state.users.find(u => u.id === otherUserId);
+                if (!otherUserId) {
+                  console.warn('⚠️ No other user ID found for conversation:', conversation.id);
+                  return null;
+                }
+                
+                const user = state.users.find(u => u.id === otherUserId);
+                if (!user) {
+                  console.warn('⚠️ User not found for conversation:', { conversationId: conversation.id, otherUserId });
+                  return null;
+                }
+                
+                return user;
               })();
+              
               const isSelected = selectedConversation === conversation.id;
+              
+              // Don't render conversation if user data is not ready
+              if (!otherUser) {
+                return null;
+              }
               
               return (
                 <motion.div
@@ -1150,6 +1246,41 @@ export function MessagesView() {
       lastScrollHeight.current = newScrollHeight;
     }
   };
+
+  // Check if conversations are ready to display (have user data)
+  const conversationsReady = useMemo(() => {
+    if (!conversations.length) return true; // No conversations to show
+    
+    // Check if all conversations have user data
+    return conversations.every(conversation => {
+      // API conversations have embedded otherUser data
+      if ((conversation as any).otherUser) return true;
+      
+      // Fallback conversations need user data in state
+      const otherUserId = conversation.participants.find(p => p !== state.currentUser?.id);
+      return otherUserId && state.users.find(u => u.id === otherUserId);
+    });
+  }, [conversations, state.users, state.currentUser?.id]);
+
+  // Enhanced user lookup with better error handling
+  const getUserForConversation = useCallback((conversation: any) => {
+    // For API conversations, use embedded otherUser data
+    if ((conversation as any).otherUser) {
+      return (conversation as any).otherUser;
+    }
+    
+    // For fallback conversations, find in state.users
+    const otherUserId = conversation.participants.find(p => p !== state.currentUser?.id);
+    if (!otherUserId) return null;
+    
+    const user = state.users.find(u => u.id === otherUserId);
+    if (!user) {
+      console.warn('⚠️ User not found for conversation:', { conversationId: conversation.id, otherUserId });
+      return null;
+    }
+    
+    return user;
+  }, [state.users, state.currentUser?.id]);
 
   return (
     <div className="h-full flex">

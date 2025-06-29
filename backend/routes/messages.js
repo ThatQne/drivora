@@ -230,13 +230,32 @@ router.post('/', auth, async (req, res) => {
       listingId: message.listingId
     };
 
-    // 🔗 WEBSOCKET: Broadcast new message to receiver
+    // 🔗 WEBSOCKET: Broadcast new message to both sender and receiver
     if (req.app.locals.webSocket) {
+      console.log('🔗 Broadcasting message via WebSocket:', {
+        messageId: formattedMessage.id,
+        senderId: req.user.id,
+        receiverId: receiverId,
+        content: formattedMessage.content.substring(0, 30)
+      });
+      
+      // Broadcast to receiver
       req.app.locals.webSocket.broadcastToUser(receiverId, {
         type: 'MESSAGE_RECEIVED',
         data: formattedMessage,
         timestamp: new Date().toISOString()
       });
+      
+      // Broadcast to sender (so they see their own message immediately)
+      req.app.locals.webSocket.broadcastToUser(req.user.id, {
+        type: 'MESSAGE_RECEIVED',
+        data: formattedMessage,
+        timestamp: new Date().toISOString()
+      });
+      
+      console.log('✅ WebSocket broadcasts sent to both users');
+    } else {
+      console.warn('⚠️ WebSocket not available for message broadcast');
     }
 
     res.status(201).json(formattedMessage);

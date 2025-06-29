@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Car, ArrowLeftRight, MessageCircle, User, LogOut, Menu, X, List, Gavel } from 'lucide-react';
 import { useApp } from '../../context/AppContext.tsx';
 import { NavigationTab } from '../../types/index.ts';
-import webSocketService from '../../services/webSocketService.ts';
 
 interface NavigationProps {
   isMobile: boolean;
@@ -28,9 +27,8 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
   const [isHovered, setIsHovered] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [hoverTimeout, setHoverTimeout] = useState<NodeJS.Timeout | null>(null);
-  const [wsConnected, setWsConnected] = useState(false);
 
-  // Cleanup timeout on unmount
+  // Cleanup hover timeout on unmount
   useEffect(() => {
     return () => {
       if (hoverTimeout) {
@@ -38,19 +36,6 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
       }
     };
   }, [hoverTimeout]);
-
-  // Monitor WebSocket connection status
-  useEffect(() => {
-    const checkConnection = () => {
-      setWsConnected(webSocketService.isConnectedToServer());
-    };
-
-    // Check immediately and then every 5 seconds
-    checkConnection();
-    const interval = setInterval(checkConnection, 5000);
-
-    return () => clearInterval(interval);
-  }, []);
 
   const navItems: Array<{ tab: NavigationTab; icon: React.ReactNode; label: string; badge?: number }> = [
     {
@@ -282,13 +267,6 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
                       <User className="w-5 h-5 text-primary-300" />
                     )}
                   </div>
-                  {/* WebSocket status dot - top right corner */}
-                  <div 
-                    className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-primary-900 ${
-                      wsConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
-                    }`}
-                    title={wsConnected ? 'Real-time: Connected' : 'Real-time: Disconnected'}
-                  />
                 </div>
                 
                 {/* Profile info */}
@@ -475,13 +453,6 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
                       <User className="w-5 h-5 text-primary-300" />
                     )}
                   </div>
-                  {/* WebSocket status dot - top right corner */}
-                  <div 
-                    className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-primary-900 ${
-                      wsConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
-                    }`}
-                    title={wsConnected ? 'Real-time: Connected' : 'Real-time: Disconnected'}
-                  />
                 </div>
               ) : (
                 /* Expanded state - icon + content with WebSocket status */
@@ -499,13 +470,6 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
                         <User className="w-5 h-5 text-primary-300" />
                       )}
                     </div>
-                    {/* WebSocket status dot - top right corner */}
-                    <div 
-                      className={`absolute -top-1 -right-1 w-3 h-3 rounded-full border-2 border-primary-900 ${
-                        wsConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
-                      }`}
-                      title={wsConnected ? 'Real-time: Connected' : 'Real-time: Disconnected'}
-                    />
                   </div>
                   
                   {/* Expandable profile info */}

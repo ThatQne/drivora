@@ -103,20 +103,20 @@ wss.on('connection', (ws, req) => {
       }
     }
 
-    // Broadcast user offline status
-    broadcastToAll({
-      type: 'USER_OFFLINE',
-      data: { userId },
-      timestamp: new Date().toISOString()
-    }, userId);
+    // DISABLED: User offline status broadcast
+    // broadcastToAll({
+    //   type: 'USER_OFFLINE',
+    //   data: { userId },
+    //   timestamp: new Date().toISOString()
+    // }, userId);
   });
 
-  // Broadcast user online status
-  broadcastToAll({
-    type: 'USER_ONLINE',
-    data: { userId },
-    timestamp: new Date().toISOString()
-  }, userId);
+  // DISABLED: User online status broadcast
+  // broadcastToAll({
+  //   type: 'USER_ONLINE',
+  //   data: { userId },
+  //   timestamp: new Date().toISOString()
+  // }, userId);
 });
 
 // WebSocket broadcast functions
@@ -175,7 +175,8 @@ connectDB();
 // Middleware
 const allowedOrigins = [
   'http://localhost:3000',  // Local development
-  'https://thatqne.github.io'  // GitHub Pages
+  'https://thatqne.github.io',  // GitHub Pages
+  'https://drivora.onrender.com'  // Render backend
 ];
 
 app.use(cors({
@@ -183,9 +184,10 @@ app.use(cors({
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
       callback(null, true);
     } else {
+      console.warn('⚠️ Blocked by CORS:', origin);
       callback(new Error('Not allowed by CORS'));
     }
   },
