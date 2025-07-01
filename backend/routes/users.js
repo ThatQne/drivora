@@ -5,13 +5,32 @@ const auth = require('../middleware/auth');
 const router = express.Router();
 
 // @route   GET /api/users
-// @desc    Get all users (for public profiles)
+// @desc    Get all users (for public profiles) or search by name
 // @access  Public
 router.get('/', async (req, res) => {
   try {
-    const users = await User.find()
+    const { search } = req.query;
+    
+    // If no search term is provided, return an empty array.
+    // This prevents loading all users by default.
+    if (!search || search.trim() === '') {
+      return res.json([]);
+    }
+
+    const searchRegex = new RegExp(search, 'i'); // 'i' for case-insensitive
+    const query = {
+      isActive: true,
+      $or: [
+        { username: searchRegex },
+        { firstName: searchRegex },
+        { lastName: searchRegex }
+      ]
+    };
+
+    const users = await User.find(query)
       .select('-password')
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(20); // Limit results for performance
     
     res.json(users);
   } catch (error) {

@@ -101,7 +101,7 @@ interface AppContextType {
   showInfo: (title: string, message?: string, duration?: number) => void;
   showMessageNotification: (message: Message, sender: User) => void;
   showTradeNotification: (trade: Trade, otherUser: User) => void;
-  loadAllUsers: () => Promise<void>;
+  searchUsers: (query: string) => Promise<void>;
 }
 
 type AppAction = 
@@ -151,6 +151,7 @@ const initialState: AppState = {
   loading: false,
   error: null,
   notifications: [],
+  activeTab: 'garage', // Default tab
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -1158,18 +1159,22 @@ export function AppProvider({ children }: AppProviderProps) {
     }
   };
 
-  const loadAllUsers = async () => {
+  const loadAllUsers = useCallback(async () => {
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
       const users = await ApiService.getAllUsers();
-      dispatch({ type: 'SET_USERS', payload: users });
+      const normalizedUsers = users.map((user: any) => ({
+        ...user,
+        id: user._id,
+      }));
+      dispatch({ type: 'SET_USERS', payload: normalizedUsers });
     } catch (error) {
       console.error("Failed to load users:", error);
       dispatch({ type: 'SET_ERROR', payload: 'Failed to load users.' });
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
     }
-  };
+  }, [dispatch]);
 
   // Lazy load specific users when needed
   const loadUsersIfNeeded = useCallback(async (userIds: string[]) => {
@@ -2142,14 +2147,20 @@ export function AppProvider({ children }: AppProviderProps) {
   };
 
   const cleanupVehicleFlags = async () => {
-    console.log('🛠️ Attempting to clean up vehicle flags...');
-    const result = await ApiService.cleanupVehicleFlags();
-    console.log(`✅ Vehicle flags cleanup result:`, result);
-    // Optionally, reload user data after cleanup
-    if (state.currentUser) {
-      await loadUserData(state.currentUser.id);
+    try {
+      const result = await ApiService.cleanupVehicleFlags();
+      console.log('Vehicle cleanup result:', result);
+      
+      // Reload user data to reflect the cleanup
+      if (state.currentUser) {
+        await loadUserData(state.currentUser.id);
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('Error cleaning up vehicle flags:', error);
+      throw error;
     }
-    return result;
   };
 
   // Helper functions for trade state management
@@ -2266,6 +2277,29 @@ export function AppProvider({ children }: AppProviderProps) {
       data: { trade, otherUser }
     });
   }, [addNotification]);
+
+  const searchUsers = useCallback(async (query: string) => {
+    // No need to search if query is too short
+    if (query.length < 2) {
+      dispatch({ type: 'SET_USERS', payload: [] });
+      return;
+    }
+    
+    try {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      const users = await ApiService.getAllUsers(query);
+      const normalizedUsers = users.map((user: any) => ({
+        ...user,
+        id: user._id,
+      }));
+      dispatch({ type: 'SET_USERS', payload: normalizedUsers });
+    } catch (error) {
+      console.error("Failed to search users:", error);
+      dispatch({ type: 'SET_ERROR', payload: 'Failed to search users.' });
+    } finally {
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  }, [dispatch]);
 
   // Memoize the context value to prevent unnecessary re-renders
   const contextValue = useMemo(() => ({
@@ -2469,7 +2503,8 @@ export function AppProvider({ children }: AppProviderProps) {
     showMessageNotification,
     showTradeNotification,
     loadAllUsers,
-  }), [state, dispatch, login, logout, updateUser, addVehicle, updateVehicle, deleteVehicle, addListing, updateListing, deleteListing, renewListing, incrementListingViews, loadAllListings, addReview, getUserProfile, sendMessage, markMessagesAsRead, addTrade, updateTrade, deleteTrade, cleanupCorruptedTrades, cleanupVehicleFlags, activeTab, setActiveTab, activeConversation, setActiveConversation, reloadTrades, loadUserMessages, loadMessagesOnTabSwitch, checkForNewMessages, addNotification, removeNotification, markNotificationRead, clearAllNotifications, showSuccess, showError, showWarning, showInfo, showMessageNotification, showTradeNotification, loadAllUsers]);
+    searchUsers,
+  }), [state, dispatch, login, logout, updateUser, addVehicle, updateVehicle, deleteVehicle, addListing, updateListing, deleteListing, renewListing, incrementListingViews, loadAllListings, addReview, getUserProfile, sendMessage, markMessagesAsRead, addTrade, updateTrade, deleteTrade, cleanupCorruptedTrades, cleanupVehicleFlags, activeTab, setActiveTab, activeConversation, setActiveConversation, reloadTrades, loadUserMessages, loadMessagesOnTabSwitch, checkForNewMessages, addNotification, removeNotification, markNotificationRead, clearAllNotifications, showSuccess, showError, showWarning, showInfo, showMessageNotification, showTradeNotification, loadAllUsers, searchUsers]);
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>;
 }

@@ -1,44 +1,44 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useApp } from '../../context/AppContext.tsx';
 import { User } from '../../types/index.ts';
-import { Search, User as UserIcon, Star, MessageSquare } from 'lucide-react';
+import { Search, User as UserIcon, Star, MessageSquare, Wind } from 'lucide-react';
 import { SellerProfileView } from '../profile/SellerProfileView.tsx';
+import { debounce } from 'lodash';
 
 export function UserSearchView() {
-  const { state, loadAllUsers } = useApp();
+  const { state, searchUsers } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Debounced search function
+  const debouncedSearch = useCallback(
+    debounce((query: string) => {
+      setIsLoading(true);
+      searchUsers(query).finally(() => setIsLoading(false));
+    }, 300), // 300ms delay
+    [searchUsers]
+  );
 
   useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        await loadAllUsers();
-      } catch (error) {
-        console.error("Failed to load users:", error);
-      } finally {
-        setIsLoading(false);
-      }
+    // Clear users when the component unmounts or search term is empty
+    return () => {
+      searchUsers(''); // This will clear the users array based on the new logic
     };
-
-    if (state.users.length === 0) {
-      fetchUsers();
-    } else {
+  }, [searchUsers]);
+  
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const query = e.target.value;
+    setSearchTerm(query);
+    if (query.length === 0) {
+      // Immediately clear results if search is cleared
+      searchUsers('');
       setIsLoading(false);
+    } else if (query.length >= 2) {
+      debouncedSearch(query);
     }
-  }, [loadAllUsers, state.users.length]);
-
-  const filteredUsers = useMemo(() => {
-    if (!searchTerm) {
-      return state.users;
-    }
-    return state.users.filter(user =>
-      user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (user.firstName && user.firstName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (user.lastName && user.lastName.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
-  }, [state.users, searchTerm]);
+  };
 
   const handleUserClick = (user: User) => {
     setSelectedUser(user);
@@ -62,32 +62,43 @@ export function UserSearchView() {
         transition={{ duration: 0.5 }}
       >
         <h1 className="text-3xl font-bold text-primary-100 mb-2">User Directory</h1>
-        <p className="text-primary-300 mb-6">Browse and search for users on the platform.</p>
+        <p className="text-primary-300 mb-6">Search for users by username, first name, or last name.</p>
         
-        {/* Search Bar */}
         <div className="relative mb-8">
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-primary-400" />
           <input
             type="text"
-            placeholder="Search by username, first name, or last name..."
+            placeholder="Start typing to search for users (min. 2 chars)..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={handleSearchChange}
             className="input-field w-full pl-12 pr-4 py-3"
           />
         </div>
       </motion.div>
 
-      {/* User Grid */}
+      {/* User Grid or Initial Prompt */}
       {isLoading ? (
-        <div className="text-center text-primary-300">Loading users...</div>
-      ) : (
+        <div className="text-center text-primary-300">Searching...</div>
+      ) : searchTerm.length < 2 ? (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-center py-16"
+        >
+          <Wind className="w-16 h-16 text-primary-500 mx-auto mb-4" />
+          <h3 className="text-xl font-semibold text-primary-200">Ready to search</h3>
+          <p className="text-primary-400">
+            Enter at least 2 characters in the search bar above to find users.
+          </p>
+        </motion.div>
+      ) : state.users.length > 0 ? (
         <motion.div
           className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.5, delay: 0.2 }}
         >
-          {filteredUsers.map((user, index) => (
+          {state.users.map((user, index) => (
             <motion.div
               key={user.id}
               initial={{ opacity: 0, y: 20 }}
@@ -124,6 +135,16 @@ export function UserSearchView() {
               </div>
             </motion.div>
           ))}
+        </motion.div>
+      ) : (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-center py-16"
+        >
+          <Search className="w-16 h-16 text-primary-500 mx-auto mb-4" />
+          <h3 className="text-xl font-semibold text-primary-200">No users found</h3>
+          <p className="text-primary-400">Try a different search term.</p>
         </motion.div>
       )}
     </div>

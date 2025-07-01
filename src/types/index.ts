@@ -202,6 +202,7 @@ export interface AppState {
   loading: boolean;
   error: string | null;
   notifications: Notification[];
+  activeTab: NavigationTab;
 }
 
 export interface Review {

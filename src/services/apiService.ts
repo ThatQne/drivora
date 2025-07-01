@@ -124,8 +124,9 @@ class ApiService {
     });
   }
 
-  static async getAllUsers(): Promise<User[]> {
-    return this.request<User[]>('/users');
+  static async getAllUsers(search?: string): Promise<User[]> {
+    const endpoint = search ? `/users?search=${encodeURIComponent(search)}` : '/users';
+    return this.request<User[]>(endpoint);
   }
 
   static async getUsersBatch(userIds: string[]): Promise<User[]> {
