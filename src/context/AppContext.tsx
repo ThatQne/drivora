@@ -101,6 +101,7 @@ interface AppContextType {
   showInfo: (title: string, message?: string, duration?: number) => void;
   showMessageNotification: (message: Message, sender: User) => void;
   showTradeNotification: (trade: Trade, otherUser: User) => void;
+  loadAllUsers: () => Promise<void>;
 }
 
 type AppAction = 
@@ -1158,27 +1159,15 @@ export function AppProvider({ children }: AppProviderProps) {
   };
 
   const loadAllUsers = async () => {
-    // Prevent duplicate calls
-    if (loadingStates.allUsers) {
-      console.log('⏳ Users already loading, skipping duplicate call');
-      return;
-    }
-
-    setLoadingStates(prev => ({ ...prev, allUsers: true }));
-    
     try {
+      dispatch({ type: 'SET_LOADING', payload: true });
       const users = await ApiService.getAllUsers();
-      const usersWithId = users.map((u: any) => ({ 
-        ...u, 
-        id: u._id || u.id 
-      }));
-      dispatch({ type: 'SET_USERS', payload: usersWithId });
+      dispatch({ type: 'SET_USERS', payload: users });
     } catch (error) {
-      console.error('Error loading users:', error);
-      // Fallback to empty array if API fails
-      dispatch({ type: 'SET_USERS', payload: [] });
+      console.error("Failed to load users:", error);
+      dispatch({ type: 'SET_ERROR', payload: 'Failed to load users.' });
     } finally {
-      setLoadingStates(prev => ({ ...prev, allUsers: false }));
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 
@@ -2144,37 +2133,23 @@ export function AppProvider({ children }: AppProviderProps) {
   };
 
   const cleanupCorruptedTrades = async () => {
-    try {
-      const result = await ApiService.cleanupCorruptedTrades();
-      console.log('Cleanup result:', result);
-      
-      // Reload trades to reflect the cleanup
-      if (state.currentUser) {
-        await loadUserData(state.currentUser.id);
-      }
-      
-      return result;
-    } catch (error) {
-      console.error('Error cleaning up corrupted trades:', error);
-      throw error;
-    }
+    console.log('🧹 Attempting to clean up corrupted trades...');
+    const result = await ApiService.cleanupCorruptedTrades();
+    console.log(`✅ Corrupted trades cleanup result:`, result);
+    // Optionally, reload trades after cleanup
+    await reloadTrades();
+    return result;
   };
 
   const cleanupVehicleFlags = async () => {
-    try {
-      const result = await ApiService.cleanupVehicleFlags();
-      console.log('Vehicle cleanup result:', result);
-      
-      // Reload user data to reflect the cleanup
-      if (state.currentUser) {
-        await loadUserData(state.currentUser.id);
-      }
-      
-      return result;
-    } catch (error) {
-      console.error('Error cleaning up vehicle flags:', error);
-      throw error;
+    console.log('🛠️ Attempting to clean up vehicle flags...');
+    const result = await ApiService.cleanupVehicleFlags();
+    console.log(`✅ Vehicle flags cleanup result:`, result);
+    // Optionally, reload user data after cleanup
+    if (state.currentUser) {
+      await loadUserData(state.currentUser.id);
     }
+    return result;
   };
 
   // Helper functions for trade state management
@@ -2493,7 +2468,8 @@ export function AppProvider({ children }: AppProviderProps) {
     showInfo,
     showMessageNotification,
     showTradeNotification,
-  }), [state, dispatch, login, logout, updateUser, addVehicle, updateVehicle, deleteVehicle, addListing, updateListing, deleteListing, renewListing, incrementListingViews, loadAllListings, addReview, getUserProfile, sendMessage, markMessagesAsRead, addTrade, updateTrade, deleteTrade, cleanupCorruptedTrades, cleanupVehicleFlags, activeTab, setActiveTab, activeConversation, setActiveConversation, reloadTrades, loadUserMessages, loadMessagesOnTabSwitch, checkForNewMessages, addNotification, removeNotification, markNotificationRead, clearAllNotifications, showSuccess, showError, showWarning, showInfo, showMessageNotification, showTradeNotification]);
+    loadAllUsers,
+  }), [state, dispatch, login, logout, updateUser, addVehicle, updateVehicle, deleteVehicle, addListing, updateListing, deleteListing, renewListing, incrementListingViews, loadAllListings, addReview, getUserProfile, sendMessage, markMessagesAsRead, addTrade, updateTrade, deleteTrade, cleanupCorruptedTrades, cleanupVehicleFlags, activeTab, setActiveTab, activeConversation, setActiveConversation, reloadTrades, loadUserMessages, loadMessagesOnTabSwitch, checkForNewMessages, addNotification, removeNotification, markNotificationRead, clearAllNotifications, showSuccess, showError, showWarning, showInfo, showMessageNotification, showTradeNotification, loadAllUsers]);
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>;
 }
