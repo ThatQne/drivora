@@ -266,16 +266,19 @@ export function GarageView() {
                   )}
                   
                   {/* Status Badge */}
-                  {isVehicleListed(vehicle) && (
+                  {vehicle.isInTrade ? (
+                    <div className="absolute top-3 left-3 bg-orange-500/90 text-white px-2 py-1 rounded-full text-xs font-medium">
+                      In Trade
+                    </div>
+                  ) : isVehicleListed(vehicle) ? (
                     <div className="absolute top-3 left-3 bg-blue-500/90 text-white px-2 py-1 rounded-full text-xs font-medium">
                       Listed
                     </div>
-                  )}
-                  {vehicle.isAuctioned && (
+                  ) : vehicle.isAuctioned ? (
                     <div className="absolute top-3 left-3 bg-purple-500/90 text-white px-2 py-1 rounded-full text-xs font-medium">
                       Auctioned
                     </div>
-                  )}
+                  ) : null}
                 </div>
 
                 <div className="p-6">
@@ -325,7 +328,13 @@ export function GarageView() {
                       </div>
 
                       {/* Listing/Auction Controls */}
-                      {!isVehicleListed(vehicle) && !vehicle.isAuctioned ? (
+                      {vehicle.isInTrade ? (
+                        <div className="flex space-x-2">
+                          <div className="flex-1 text-center py-2 bg-orange-500/10 border border-orange-500/20 rounded-lg">
+                            <span className="text-sm text-orange-400">In Active Trade</span>
+                          </div>
+                        </div>
+                      ) : !isVehicleListed(vehicle) && !vehicle.isAuctioned ? (
                         <div className="flex space-x-2">
                           <motion.button
                             whileHover={{ scale: 1.02 }}

@@ -14,6 +14,7 @@ const listingRoutes = require('./routes/listings');
 const userRoutes = require('./routes/users');
 const tradeRoutes = require('./routes/trades');
 const messageRoutes = require('./routes/messages');
+const reviewRoutes = require('./routes/reviews');
 
 const app = express();
 const server = http.createServer(app);
@@ -221,6 +222,7 @@ app.use('/api/listings', listingRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/trades', tradeRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/reviews', reviewRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

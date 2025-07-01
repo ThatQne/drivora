@@ -32,7 +32,7 @@ export interface Vehicle {
   listingId?: string;
   auctionId?: string;
   // Trade status tracking
-  inTrade?: boolean;
+  isInTrade?: boolean;
   tradeId?: string;
 }
 

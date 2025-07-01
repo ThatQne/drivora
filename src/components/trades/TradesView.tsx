@@ -129,7 +129,7 @@ export function TradesView() {
         : (trade.receiverUserId as any)?._id || (trade.receiverUserId as any)?.id;
       
       return (offererId === state.currentUser?.id || receiverId === state.currentUser?.id) && 
-             (trade.status === 'completed' || trade.status === 'declined'); // Include declined trades
+             (trade.status === 'completed' || trade.status === 'declined');
     });
     
     return filtered;

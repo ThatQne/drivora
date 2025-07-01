@@ -67,6 +67,7 @@ interface AppContextType {
   incrementListingViews: (listingId: string) => Promise<void>;
   loadAllListings: (forceRefresh?: boolean) => Promise<void>;
   addReview: (review: Omit<Review, 'id' | 'createdAt'>) => Promise<void>;
+  submitReview: (review: Omit<Review, 'id' | 'createdAt'>) => Promise<void>;
   getUserProfile: (userId: string) => User | null;
   sendMessage: (message: Omit<Message, 'id' | 'timestamp' | 'read'>) => Promise<void>;
   markMessagesAsRead: (conversationId: string) => Promise<void>;
@@ -1617,6 +1618,19 @@ export function AppProvider({ children }: AppProviderProps) {
     }
   };
 
+  const submitReview = async (reviewData: Omit<Review, 'id' | 'createdAt'>) => {
+    try {
+      const response = await ApiService.createReview(reviewData);
+      // Reload all data to update ratings
+      await loadAllListings();
+      showSuccess('Review Submitted', 'Thank you for your feedback!');
+    } catch (error) {
+      console.error('Error submitting review:', error);
+      showError('Review Failed', 'Unable to submit your review. Please try again.');
+      throw error;
+    }
+  };
+
   const getUserProfile = (userId: string): User | null => {
     // Try direct match first
     let user = state.users.find(u => u.id === userId);
@@ -2314,6 +2328,7 @@ export function AppProvider({ children }: AppProviderProps) {
     incrementListingViews,
     loadAllListings,
     addReview,
+    submitReview,
     getUserProfile,
     sendMessage,
     markMessagesAsRead,

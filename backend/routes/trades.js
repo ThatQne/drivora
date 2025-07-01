@@ -370,10 +370,11 @@ router.put('/:id', auth, async (req, res) => {
     const validTransitions = {
       'pending': ['accepted', 'rejected', 'cancelled', 'countered'],
       'countered': ['accepted', 'rejected', 'cancelled', 'countered'],
-      'accepted': ['completed'],
+      'accepted': ['completed', 'declined'],
       'rejected': [],
       'cancelled': [],
-      'completed': []
+      'completed': [],
+      'declined': []
     };
 
     console.log(`🔄 Status transition check: ${trade.status} -> ${status}`);
@@ -555,7 +556,7 @@ router.put('/:id', auth, async (req, res) => {
 
     trade.tradeHistory.push(historyEntry);
 
-    // If trade is accepted, remove all involved vehicles from listings
+    // If trade is accepted, remove all involved vehicles from listings and mark as in trade
     if (status === 'accepted') {
       console.log(`🔄 Trade ${trade._id} accepted - removing vehicles from listings`);
       
@@ -566,7 +567,7 @@ router.put('/:id', auth, async (req, res) => {
       ];
 
       if (allVehicleIds.length > 0) {
-        // Deactivate listings for all involved vehicles
+        // Deactivate listings for all involved vehicles (only if they are currently listed)
         const deactivatedListings = await Listing.updateMany(
           { vehicleId: { $in: allVehicleIds }, isActive: true },
           { 
@@ -578,17 +579,87 @@ router.put('/:id', auth, async (req, res) => {
 
         console.log(`🚫 Deactivated ${deactivatedListings.modifiedCount} listings for vehicles in accepted trade`);
 
-        // Update vehicle flags
+        // Update vehicle flags - mark as in trade and remove listing flags
         await Vehicle.updateMany(
           { _id: { $in: allVehicleIds } },
           { 
             isListed: false,
-            listingId: null
+            listingId: null,
+            isInTrade: true,
+            tradeId: trade._id
           }
         );
 
-        console.log(`🔄 Updated ${allVehicleIds.length} vehicles to remove listing flags`);
+        console.log(`🔄 Updated ${allVehicleIds.length} vehicles - removed listing flags and marked as in trade`);
       }
+
+      // Cancel all other pending/active trades for this listing since it's now accepted
+      const cancelledTrades = await Trade.updateMany(
+        {
+          listingId: trade.listingId,
+          _id: { $ne: trade._id },
+          status: { $in: ['pending', 'countered'] }
+        },
+        {
+          status: 'cancelled',
+          updatedAt: new Date()
+        }
+      );
+      
+      if (cancelledTrades.modifiedCount > 0) {
+        console.log(`🚫 Cancelled ${cancelledTrades.modifiedCount} other trades for accepted listing ${trade.listingId}`);
+      }
+    }
+
+    // If trade is completed, transfer vehicle ownership and mark listing as sold
+    if (status === 'completed') {
+      console.log(`🔄 Completing trade ${trade._id} - transferring ownership`);
+      
+      // Transfer vehicle ownership
+      if (trade.offererVehicleIds.length > 0) {
+        await Vehicle.updateMany(
+          { _id: { $in: trade.offererVehicleIds } },
+          { 
+            ownerId: trade.receiverUserId,
+            isListed: false,
+            isAuctioned: false,
+            listingId: null,
+            isInTrade: false,
+            tradeId: null
+          }
+        );
+        console.log(`🔄 Transferred ${trade.offererVehicleIds.length} vehicles from offerer to receiver`);
+      }
+
+      if (trade.receiverVehicleIds && trade.receiverVehicleIds.length > 0) {
+        await Vehicle.updateMany(
+          { _id: { $in: trade.receiverVehicleIds } },
+          { 
+            ownerId: trade.offererUserId,
+            isListed: false,
+            isAuctioned: false,
+            listingId: null,
+            isInTrade: false,
+            tradeId: null
+          }
+        );
+        console.log(`🔄 Transferred ${trade.receiverVehicleIds.length} vehicles from receiver to offerer`);
+      }
+
+      // Mark the original listing as sold
+      const listing = await Listing.findById(trade.listingId);
+      if (listing) {
+        listing.isActive = false;
+        listing.soldAt = new Date();
+        listing.soldTo = trade.offererUserId;
+        listing.soldPrice = trade.offererCashAmount + 
+          (await Vehicle.find({ _id: { $in: trade.offererVehicleIds } }))
+            .reduce((sum, v) => sum + (v.customPrice || v.estimatedValue), 0);
+        await listing.save();
+        console.log(`✅ Marked listing ${listing._id} as sold due to completed trade ${trade._id}`);
+      }
+
+      trade.completedAt = new Date();
     }
 
     // If trade is cancelled, handle same as rejected (keep vehicles listed)
@@ -613,71 +684,26 @@ router.put('/:id', auth, async (req, res) => {
       return res.json(tradeWithId);
     }
 
-    // If trade is completed, mark listing as sold and transfer vehicle ownership
-    if (status === 'completed') {
-      const listing = await Listing.findById(trade.listingId);
-      if (listing) {
-        listing.isActive = false;
-        listing.soldAt = new Date();
-        listing.soldTo = trade.offererUserId;
-        listing.soldPrice = trade.offererCashAmount + 
-          (await Vehicle.find({ _id: { $in: trade.offererVehicleIds } }))
-            .reduce((sum, v) => sum + (v.customPrice || v.estimatedValue), 0);
-        await listing.save();
-        console.log(`✅ Marked listing ${listing._id} as sold due to completed trade ${trade._id}`);
-        
-        // Clear the target vehicle's listing flags since it's sold
-        const targetVehicle = await Vehicle.findById(listing.vehicleId);
-        if (targetVehicle) {
-          targetVehicle.isListed = false;
-          targetVehicle.listingId = null;
-          await targetVehicle.save();
-          console.log(`🔄 Cleared listing flags for sold vehicle ${targetVehicle._id}`);
-        }
-      }
-
-      // Transfer vehicle ownership and clear trade-related flags
-      if (trade.offererVehicleIds.length > 0) {
-        await Vehicle.updateMany(
-          { _id: { $in: trade.offererVehicleIds } },
-          { 
-            ownerId: trade.receiverUserId,
-            isListed: false,
-            isAuctioned: false,
-            listingId: null
-          }
-        );
-        console.log(`🔄 Transferred ${trade.offererVehicleIds.length} vehicles from offerer to receiver and cleared flags`);
-      }
-
-      if (trade.receiverVehicleIds && trade.receiverVehicleIds.length > 0) {
-        await Vehicle.updateMany(
-          { _id: { $in: trade.receiverVehicleIds } },
-          { 
-            ownerId: trade.offererUserId,
-            isListed: false,
-            isAuctioned: false,
-            listingId: null
-          }
-        );
-        console.log(`🔄 Transferred ${trade.receiverVehicleIds.length} vehicles from receiver to offerer and cleared flags`);
-      }
-
-      // Cancel all other pending/active trades for this listing since it's now sold
-      const cancelledTrades = await Trade.updateMany(
-        {
-          listingId: trade.listingId,
-          _id: { $ne: trade._id }, // Don't cancel the current trade
-          status: { $in: ['pending', 'accepted', 'pending_acceptance', 'countered'] }
-        },
-        {
-          status: 'cancelled',
-          updatedAt: new Date()
-        }
-      );
+    // Handle declined trades - mark as declined and restore vehicle availability
+    if (status === 'declined') {
+      console.log(`🔄 Trade ${trade._id} declined - restoring vehicle availability`);
       
-      if (cancelledTrades.modifiedCount > 0) {
-        console.log(`🚫 Cancelled ${cancelledTrades.modifiedCount} other trades for sold listing ${listing._id}`);
+      // Get all vehicle IDs involved in the trade
+      const allVehicleIds = [
+        ...trade.offererVehicleIds,
+        ...(trade.receiverVehicleIds || [])
+      ];
+
+      if (allVehicleIds.length > 0) {
+        // Clear trade flags from vehicles - they can now be relisted
+        await Vehicle.updateMany(
+          { _id: { $in: allVehicleIds } },
+          { 
+            isInTrade: false,
+            tradeId: null
+          }
+        );
+        console.log(`🔄 Cleared trade flags from ${allVehicleIds.length} vehicles - they can now be relisted`);
       }
 
       trade.completedAt = new Date();

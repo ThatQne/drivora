@@ -13,11 +13,8 @@ const reviewSchema = new mongoose.Schema({
   },
   tradeId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Trade'
-  },
-  listingId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Listing'
+    ref: 'Trade',
+    required: true
   },
   rating: {
     type: Number,
@@ -31,65 +28,19 @@ const reviewSchema = new mongoose.Schema({
     trim: true,
     maxlength: 1000
   },
-  isVerified: {
-    type: Boolean,
-    default: false
-  },
-  helpful: {
-    type: Number,
-    default: 0,
-    min: 0
-  },
-  reported: {
-    type: Boolean,
-    default: false
+  createdAt: {
+    type: Date,
+    default: Date.now
   }
-}, {
-  timestamps: true
 });
 
 // Indexes for better performance
-reviewSchema.index({ revieweeId: 1, createdAt: -1 });
+reviewSchema.index({ revieweeId: 1 });
 reviewSchema.index({ reviewerId: 1 });
-reviewSchema.index({ rating: 1 });
 reviewSchema.index({ tradeId: 1 });
+reviewSchema.index({ createdAt: -1 });
 
-// Prevent duplicate reviews for the same trade
-reviewSchema.index({ reviewerId: 1, revieweeId: 1, tradeId: 1 }, { unique: true, sparse: true });
-
-// Prevent users from reviewing themselves
-reviewSchema.pre('save', function(next) {
-  if (this.reviewerId.equals(this.revieweeId)) {
-    next(new Error('Users cannot review themselves'));
-  } else {
-    next();
-  }
-});
-
-// Update reviewee's rating after saving a review
-reviewSchema.post('save', async function() {
-  try {
-    const User = mongoose.model('User');
-    const reviewee = await User.findById(this.revieweeId);
-    if (reviewee) {
-      await reviewee.updateRating();
-    }
-  } catch (error) {
-    console.error('Error updating user rating:', error);
-  }
-});
-
-// Update reviewee's rating after deleting a review
-reviewSchema.post('deleteOne', { document: true, query: false }, async function() {
-  try {
-    const User = mongoose.model('User');
-    const reviewee = await User.findById(this.revieweeId);
-    if (reviewee) {
-      await reviewee.updateRating();
-    }
-  } catch (error) {
-    console.error('Error updating user rating:', error);
-  }
-});
+// Compound index to prevent duplicate reviews
+reviewSchema.index({ reviewerId: 1, revieweeId: 1, tradeId: 1 }, { unique: true });
 
 module.exports = mongoose.model('Review', reviewSchema); 

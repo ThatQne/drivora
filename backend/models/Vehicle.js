@@ -65,6 +65,14 @@ const vehicleSchema = new mongoose.Schema({
   auctionId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Auction'
+  },
+  isInTrade: {
+    type: Boolean,
+    default: false
+  },
+  tradeId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Trade'
   }
 }, {
   timestamps: true

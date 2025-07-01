@@ -11,11 +11,13 @@ import {
   User,
   Calendar,
   AlertTriangle,
-  Edit
+  Edit,
+  Star
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.tsx';
 import { Trade, TradeHistoryItem, Vehicle } from '../../types/index.ts';
 import { MessageStarter } from '../messages/MessageStarter.tsx';
+import { ReviewModal } from '../profile/ReviewModal.tsx';
 
 interface TradeDetailModalProps {
   trade: Trade;
@@ -30,6 +32,7 @@ export function TradeDetailModal({ trade, isOutbound, onClose, onCounterOffer }:
   const [messageText, setMessageText] = useState('');
 
   const [showMessageStarter, setShowMessageStarter] = useState(false);
+  const [showReviewModal, setShowReviewModal] = useState(false);
 
   const listing = state.allListings.find(l => l.id === trade.listingId);
   const targetVehicle = listing ? (listing as any).vehicle || state.vehicles.find(v => v.id === listing.vehicleId) : null;
@@ -210,21 +213,7 @@ export function TradeDetailModal({ trade, isOutbound, onClose, onCounterOffer }:
       const updatedTrade = {
         ...trade,
         status: 'completed' as const,
-        completedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        tradeHistory: [
-          ...trade.tradeHistory,
-          {
-            id: `history_${Date.now()}`,
-            action: 'completed' as const,
-            userId: state.currentUser!.id,
-            timestamp: new Date().toISOString(),
-            offererCashAmount: trade.offererCashAmount,
-            offererVehicleIds: trade.offererVehicleIds,
-            receiverCashAmount: trade.receiverCashAmount,
-            receiverVehicleIds: trade.receiverVehicleIds
-          }
-        ]
       };
       await updateTrade(updatedTrade);
       onClose();
@@ -242,19 +231,6 @@ export function TradeDetailModal({ trade, isOutbound, onClose, onCounterOffer }:
         ...trade,
         status: 'declined' as const,
         updatedAt: new Date().toISOString(),
-        tradeHistory: [
-          ...trade.tradeHistory,
-          {
-            id: `history_${Date.now()}`,
-            action: 'declined' as const,
-            userId: state.currentUser!.id,
-            timestamp: new Date().toISOString(),
-            offererCashAmount: trade.offererCashAmount,
-            offererVehicleIds: trade.offererVehicleIds,
-            receiverCashAmount: trade.receiverCashAmount,
-            receiverVehicleIds: trade.receiverVehicleIds
-          }
-        ]
       };
       await updateTrade(updatedTrade);
       onClose();
@@ -608,8 +584,8 @@ export function TradeDetailModal({ trade, isOutbound, onClose, onCounterOffer }:
               </div>
             )}
 
-            {/* Completion Actions for Accepted/Pending Acceptance Trades */}
-            {(trade.status === 'accepted' || trade.status === 'pending_acceptance') && (
+            {/* Completion Actions for Accepted Trades */}
+            {trade.status === 'accepted' && (
               <div>
                 <h3 className="text-lg font-semibold text-primary-100 mb-4">Trade Completion</h3>
                 <div className="glass-effect rounded-xl p-4 space-y-4">
@@ -638,6 +614,60 @@ export function TradeDetailModal({ trade, isOutbound, onClose, onCounterOffer }:
                       <XCircle className="w-5 h-5" />
                       Mark as Declined
                     </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Review Section for Completed Trades */}
+            {trade.status === 'completed' && (
+              <div>
+                <h3 className="text-lg font-semibold text-primary-100 mb-4">Trade Completed</h3>
+                <div className="glass-effect rounded-xl p-4 space-y-4">
+                  <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
+                    <p className="text-sm text-green-300">
+                      <strong>Trade Successful!</strong> The vehicles have been exchanged. 
+                      You can now leave a review for the other party.
+                    </p>
+                  </div>
+                  
+                  {otherUser && (
+                    <button
+                      onClick={() => setShowReviewModal(true)}
+                      className="btn-primary w-full flex items-center justify-center gap-2"
+                    >
+                      <Star className="w-5 h-5" />
+                      Leave Review for @{otherUser.username}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Cancelled Trade Info */}
+            {trade.status === 'cancelled' && (
+              <div>
+                <h3 className="text-lg font-semibold text-primary-100 mb-4">Trade Cancelled</h3>
+                <div className="glass-effect rounded-xl p-4">
+                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                    <p className="text-sm text-red-300">
+                      This trade was cancelled before completion.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Declined Trade Info */}
+            {trade.status === 'declined' && (
+              <div>
+                <h3 className="text-lg font-semibold text-primary-100 mb-4">Trade Declined</h3>
+                <div className="glass-effect rounded-xl p-4">
+                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                    <p className="text-sm text-red-300">
+                      This trade was declined after acceptance. 
+                      All vehicles have been returned to their original owners and can be relisted.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -744,6 +774,17 @@ export function TradeDetailModal({ trade, isOutbound, onClose, onCounterOffer }:
             tradeId={trade.id}
             initialMessage={`Hi! I wanted to discuss our trade for the ${targetVehicle?.year} ${targetVehicle?.make} ${targetVehicle?.model}.`}
             onClose={() => setShowMessageStarter(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Review Modal */}
+      <AnimatePresence>
+        {showReviewModal && otherUser && (
+          <ReviewModal
+            trade={trade}
+            revieweeUser={otherUser}
+            onClose={() => setShowReviewModal(false)}
           />
         )}
       </AnimatePresence>
