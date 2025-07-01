@@ -21,7 +21,7 @@ import { TradeDetailModal } from './TradeDetailModal.tsx';
 import { TradeOfferModal } from './TradeOfferModal.tsx';
 
 export function TradesView() {
-  const { state, loadAllListings, reloadTrades } = useApp();
+  const { state, loadAllListings, reloadTrades, showSuccess, showError, showInfo } = useApp();
   const [activeTab, setActiveTab] = useState<'outbound' | 'inbound' | 'pending' | 'completed'>('outbound');
   const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -34,11 +34,16 @@ export function TradesView() {
   useEffect(() => {
     const loadTradesAndListings = async () => {
       console.log('🔄 TradesView mounted, reloading trades to trigger cleanup...');
-      await reloadTrades();
-      
-      // Also ensure we have listing data
-      if (state.allListings.length === 0) {
-        await loadAllListings();
+      try {
+        await reloadTrades();
+        // Removed the info notification to prevent spam
+        showInfo('Trades Updated', 'Refreshed your trade offers');
+        // Also ensure we have listing data
+        if (state.allListings.length === 0) {
+          await loadAllListings();
+        }
+      } catch (error) {
+        showError('Failed to Load Trades', 'Unable to refresh trade data');
       }
     };
 

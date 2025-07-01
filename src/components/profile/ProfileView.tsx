@@ -6,7 +6,7 @@ import { AuthService } from '../../services/authService.ts';
 import ApiService from '../../services/apiService.ts';
 
 export function ProfileView() {
-  const { state, updateUser } = useApp();
+  const { state, updateUser, showSuccess, showError, showWarning, showInfo } = useApp();
   const [isEditing, setIsEditing] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
@@ -151,23 +151,24 @@ export function ProfileView() {
 
     // Check file type
     if (!file.type.startsWith('image/')) {
-      alert('Please select a valid image file (jpg, png, gif, etc.)');
+      showError('Invalid File Type', 'Please select a valid image file (jpg, png, gif, etc.)');
       return;
     }
 
     // Check if file is corrupted or empty
     if (file.size === 0) {
-      alert('Selected file appears to be empty or corrupted');
+      showError('Invalid File', 'Selected file appears to be empty or corrupted');
       return;
     }
 
     // Check maximum file size (50MB limit)
     if (file.size > 50 * 1024 * 1024) {
-      alert('Image file is too large. Please select an image smaller than 50MB.');
+      showError('File Too Large', 'Image file is too large. Please select an image smaller than 50MB.');
       return;
     }
 
     setLoading(true);
+    showInfo('Uploading Image', 'Processing your avatar image...');
     
     try {
       let imageUrl: string;
@@ -178,10 +179,10 @@ export function ProfileView() {
         try {
           imageUrl = await compressImage(file, 5);
           console.log('Image compressed successfully');
-          alert('Image was compressed to reduce file size.');
+          showInfo('Image Compressed', 'Image was compressed to reduce file size.');
         } catch (compressionError) {
           console.error('Compression failed:', compressionError);
-          alert('Failed to compress image: ' + (compressionError instanceof Error ? compressionError.message : 'Unknown compression error'));
+          showError('Compression Failed', 'Failed to compress image: ' + (compressionError instanceof Error ? compressionError.message : 'Unknown compression error'));
           return;
         }
       } else {
@@ -199,74 +200,36 @@ export function ProfileView() {
                 } else {
                   reject(new Error('FileReader result is not a string'));
                 }
-              } catch (err) {
-                reject(new Error('Error processing file reader result: ' + (err instanceof Error ? err.message : 'Unknown error')));
+              } catch (error) {
+                reject(error);
               }
             };
             
             reader.onerror = (error) => {
               console.error('FileReader error:', error);
-              reject(new Error('Failed to read file: ' + (reader.error?.message || 'Unknown file reading error')));
+              reject(new Error('Failed to read file'));
             };
-            
-            reader.onabort = () => {
-              reject(new Error('File reading was aborted'));
-            };
-            
-            // Add timeout for file reading
-            setTimeout(() => {
-              if (reader.readyState === FileReader.LOADING) {
-                reader.abort();
-                reject(new Error('File reading timeout'));
-              }
-            }, 30000); // 30 second timeout
             
             reader.readAsDataURL(file);
           });
-          console.log('File read successfully');
-        } catch (readError) {
-          console.error('File reading failed:', readError);
-          alert('Failed to read image file: ' + (readError instanceof Error ? readError.message : 'Unknown reading error'));
+        } catch (fileError) {
+          console.error('File reading failed:', fileError);
+          showError('File Read Error', 'Failed to read image file: ' + (fileError instanceof Error ? fileError.message : 'Unknown file error'));
           return;
         }
       }
       
-      // Validate the resulting data URL
-      if (!imageUrl || !imageUrl.startsWith('data:image/')) {
-        throw new Error('Invalid image data generated');
-      }
-      
-      console.log('Image processing complete, data URL length:', imageUrl.length);
-      
-      // Update profile data state
+      // Update profile data with new avatar
       setProfileData(prev => ({
         ...prev,
         avatar: imageUrl
       }));
 
-      // Immediately save the profile picture to user data
-      if (state.currentUser && typeof updateUser === 'function') {
-        const updatedUser = {
-          ...state.currentUser,
-          avatar: imageUrl,
-        };
-        
-        console.log('Saving profile picture to user data');
-        try {
-          updateUser(updatedUser);
-          console.log('Profile picture saved successfully');
-          alert('Profile picture updated successfully!');
-        } catch (updateError) {
-          console.error('Failed to update user:', updateError);
-          alert('Failed to save profile picture: ' + (updateError instanceof Error ? updateError.message : 'Unknown save error'));
-        }
-      } else {
-        console.error('Cannot save profile picture - user or updateUser function not available');
-        alert('Cannot save profile picture - please try logging out and back in');
-      }
+      showSuccess('Avatar Updated!', 'Your profile picture has been updated. Don\'t forget to save your changes.');
+      
     } catch (error) {
-      console.error('Unexpected error during image processing:', error);
-      alert('Unexpected error occurred: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      console.error('Avatar upload failed:', error);
+      showError('Upload Failed', 'Failed to upload avatar: ' + (error instanceof Error ? error.message : 'Unknown error'));
     } finally {
       setLoading(false);
       // Clear the input to allow re-selecting the same file
@@ -276,7 +239,7 @@ export function ProfileView() {
 
   const handleSaveProfile = async () => {
     if (!state.currentUser) {
-      alert('User not found. Please log in again.');
+      showError('Authentication Error', 'User not found. Please log in again.');
       return;
     }
 
@@ -285,7 +248,7 @@ export function ProfileView() {
       // Validate username format (no spaces, special characters allowed, max 24 chars)
       const usernameRegex = /^[a-zA-Z0-9_-]+$/;
       if (!usernameRegex.test(profileData.username) || profileData.username.length > 24) {
-        alert('Username can only contain letters, numbers, underscores, and hyphens. Maximum 24 characters.');
+        showError('Invalid Username', 'Username can only contain letters, numbers, underscores, and hyphens. Maximum 24 characters.');
         setLoading(false);
         return;
       }
@@ -294,7 +257,7 @@ export function ProfileView() {
       if (profileData.username !== state.currentUser.username) {
         const result = await ApiService.checkUsername(profileData.username);
         if (result.exists) {
-          alert('Username is already taken.');
+          showError('Username Taken', 'Username is already taken. Please choose another.');
           setLoading(false);
           return;
         }
@@ -316,14 +279,14 @@ export function ProfileView() {
       // Update local state
       if (typeof updateUser === 'function') {
         updateUser({ ...updatedUser, id: updatedUser._id || updatedUser.id });
-        alert('Profile updated successfully!');
+        showSuccess('Profile Updated!', 'Your profile information has been saved successfully.');
         setIsEditing(false);
       } else {
         throw new Error('updateUser function not available');
       }
     } catch (error: any) {
       console.error('Failed to update profile:', error);
-      alert('Failed to update profile: ' + (error.message || 'Please try again.'));
+      showError('Update Failed', 'Failed to update profile: ' + (error.message || 'Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -333,12 +296,12 @@ export function ProfileView() {
     if (!state.currentUser) return;
 
     if (passwordData.newPassword !== passwordData.confirmPassword) {
-      alert('New passwords do not match.');
+      showError('Password Mismatch', 'New passwords do not match.');
       return;
     }
 
     if (passwordData.newPassword.length < 6) {
-      alert('Password must be at least 6 characters long.');
+      showError('Password Too Short', 'Password must be at least 6 characters long.');
       return;
     }
 
@@ -347,7 +310,7 @@ export function ProfileView() {
       // Change password via API
       await ApiService.changePassword(passwordData.currentPassword, passwordData.newPassword);
       
-      alert('Password changed successfully!');
+      showSuccess('Password Changed!', 'Your password has been updated successfully.');
       setIsChangingPassword(false);
       setPasswordData({
         currentPassword: '',
@@ -356,7 +319,7 @@ export function ProfileView() {
       });
     } catch (error: any) {
       console.error('Failed to change password:', error);
-      alert('Failed to change password: ' + (error.message || 'Please try again.'));
+      showError('Password Change Failed', 'Failed to change password: ' + (error.message || 'Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -373,6 +336,14 @@ export function ProfileView() {
   };
 
   const passwordStrength = getPasswordStrength(passwordData.newPassword);
+
+  // Test notification functions
+  const testNotifications = () => {
+    showSuccess('Success!', 'This is a success notification');
+    setTimeout(() => showError('Authentication Failed', 'Invalid credentials provided. Please check your username and password and try again. Error code: AUTH_001'), 1000);
+    setTimeout(() => showWarning('Warning!', 'This is a warning notification'), 2000);
+    setTimeout(() => showInfo('Info!', 'This is an info notification'), 3000);
+  };
 
   if (!state.currentUser) {
     return (
@@ -391,6 +362,16 @@ export function ProfileView() {
           <h1 className="text-3xl font-bold text-primary-100">Profile Settings</h1>
           <p className="text-primary-300 mt-1">Manage your account information and preferences</p>
         </div>
+        
+        {/* Test Notifications Button */}
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={testNotifications}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+        >
+          Test Notifications
+        </motion.button>
       </div>
 
       {/* Profile Information Card */}

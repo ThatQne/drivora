@@ -95,7 +95,7 @@ export function GarageView() {
       return;
     }
 
-    // Check if listing can be renewed (24-hour cooldown)
+    // Check if listing can be renewed (12-hour cooldown)
     if (listing.canRenewAfter) {
       const canRenewTime = new Date(listing.canRenewAfter).getTime();
       const currentTime = new Date().getTime();
@@ -107,7 +107,7 @@ export function GarageView() {
       }
     }
 
-    if (window.confirm('Renew this listing? This will refresh its position and reset the 24-hour renewal timer.')) {
+    if (window.confirm('Renew this listing? This will refresh its position and reset the 12-hour renewal timer.')) {
       renewListing(listing.id);
       alert('Listing renewed successfully!');
     }

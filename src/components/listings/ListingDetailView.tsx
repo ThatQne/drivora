@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Car, Calendar, Gauge, DollarSign, User, MessageCircle, ArrowLeftRight, Eye, MapPin, Phone, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, Car, Calendar, Gauge, DollarSign, User, MessageCircle, ArrowLeftRight, Eye, MapPin, Phone, ChevronLeft, ChevronRight, Copy, Check } from 'lucide-react';
 import { Listing, Vehicle, User as UserType } from '../../types/index.ts';
 import { useApp } from '../../context/AppContext.tsx';
 import { MessageButton } from '../messages/MessageButton.tsx';
@@ -13,12 +13,14 @@ interface ListingDetailViewProps {
   onClose: () => void;
   onContact: (listing: Listing) => void;
   onTrade: (listing: Listing) => void;
+  onSellerClick?: (seller: UserType) => void;
 }
 
-export function ListingDetailView({ listing, vehicle, seller, onClose, onContact, onTrade }: ListingDetailViewProps) {
-  const { state } = useApp();
+export function ListingDetailView({ listing, vehicle, seller, onClose, onContact, onTrade, onSellerClick }: ListingDetailViewProps) {
+  const { state, showSuccess, showError } = useApp();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [vinCopied, setVinCopied] = useState(false);
 
   // Check if current user is the seller to prevent self-trading/contacting
   const isOwnListing = state.currentUser?.id === listing.sellerId;
@@ -37,6 +39,18 @@ export function ListingDetailView({ listing, vehicle, seller, onClose, onContact
 
   const handleImageClick = () => {
     setImageModalOpen(true);
+  };
+
+  const handleCopyVin = async () => {
+    try {
+      await navigator.clipboard.writeText(vehicle.vin);
+      setVinCopied(true);
+      setTimeout(() => setVinCopied(false), 2000);
+      showSuccess('VIN Copied!', `VIN ${vehicle.vin} copied to clipboard`, 3000);
+    } catch (err) {
+      console.error('Failed to copy VIN:', err);
+      showError('Copy Failed', 'Unable to copy VIN to clipboard', 4000);
+    }
   };
 
   const formatTimeAgo = (dateString: string) => {
@@ -202,12 +216,27 @@ export function ListingDetailView({ listing, vehicle, seller, onClose, onContact
                   </div>
                 </div>
 
-                <div className="col-span-2 flex items-center space-x-2">
-                  <Car className="w-5 h-5 text-primary-400" />
-                  <div>
-                    <p className="text-sm text-primary-400">VIN</p>
-                    <p className="font-medium text-primary-200 font-mono">{vehicle.vin}</p>
+                <div className="col-span-2 flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Car className="w-5 h-5 text-primary-400" />
+                    <div>
+                      <p className="text-sm text-primary-400">VIN</p>
+                      <p className="font-medium text-primary-200 font-mono">{vehicle.vin}</p>
+                    </div>
                   </div>
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={handleCopyVin}
+                    className="p-2 hover:bg-primary-800/50 rounded-lg transition-colors"
+                    title="Copy VIN"
+                  >
+                    {vinCopied ? (
+                      <Check className="w-5 h-5 text-green-500" />
+                    ) : (
+                      <Copy className="w-5 h-5 text-primary-400" />
+                    )}
+                  </motion.button>
                 </div>
               </div>
             </div>
@@ -300,49 +329,117 @@ export function ListingDetailView({ listing, vehicle, seller, onClose, onContact
               </div>
             )}
 
-            {/* Seller Information */}
-            <div className="glass-effect rounded-xl p-4">
-              <h3 className="text-lg font-semibold text-primary-100 mb-3">Seller Information</h3>
-              <div className="flex items-center space-x-3 mb-4">
-                <div className="w-12 h-12 bg-primary-800/50 rounded-full flex items-center justify-center overflow-hidden">
-                  {seller.avatar ? (
-                    <img
-                      src={seller.avatar}
-                      alt={seller.username}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <User className="w-6 h-6 text-primary-300" />
-                  )}
+            {/* Listing History */}
+            {listing.history && listing.history.length > 0 && (
+              <div className="glass-effect rounded-xl p-4">
+                <h3 className="text-lg font-semibold text-primary-100 mb-3">Listing History</h3>
+                <div className="space-y-2">
+                  {listing.history.slice().reverse().map((historyEntry, index) => {
+                    let displayText = '';
+                    let displayValue = '';
+                    
+                    switch (historyEntry.type) {
+                      case 'price_change':
+                        displayText = 'Price changed';
+                        displayValue = `$${historyEntry.newValue.toLocaleString()}`;
+                        break;
+                      case 'title_update':
+                        displayText = 'Title updated';
+                        displayValue = historyEntry.newValue;
+                        break;
+                      case 'description_update':
+                        displayText = 'Description updated';
+                        displayValue = 'View changes';
+                        break;
+                      case 'problems_update':
+                        displayText = 'Problems updated';
+                        displayValue = `${historyEntry.newValue.length} items`;
+                        break;
+                      case 'features_update':
+                        displayText = 'Features updated';
+                        displayValue = `${historyEntry.newValue.length} items`;
+                        break;
+                      case 'tags_update':
+                        displayText = 'Tags updated';
+                        displayValue = `${historyEntry.newValue.length} tags`;
+                        break;
+                    }
+                    
+                    return (
+                      <div
+                        key={index}
+                        className={`flex items-center justify-between p-2 rounded-lg ${
+                          index === 0 ? 'bg-green-500/10 border border-green-500/20' : 'bg-primary-800/20'
+                        }`}
+                      >
+                        <div className="flex flex-col">
+                          <span className={`font-medium ${index === 0 ? 'text-green-400' : 'text-primary-300'}`}>
+                            {displayText}
+                          </span>
+                          <span className="text-xs text-primary-400">
+                            {displayValue}
+                          </span>
+                        </div>
+                        <span className="text-xs text-primary-400">
+                          {index === 0 ? 'Latest' : formatTimeAgo(historyEntry.changedAt)}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div>
-                  <p className="font-medium text-primary-200">@{seller.username}</p>
-                  <div className="text-sm text-primary-400">
-                    <p>Listed {formatTimeAgo(listing.createdAt)}</p>
-                    {listing.lastEditedAt && (
-                      <p className="text-yellow-400">
-                        Last edited {formatTimeAgo(listing.lastEditedAt)}
-                      </p>
+              </div>
+            )}
+
+            {/* Seller Information */}
+            <div className="glass-effect rounded-xl p-4 hover:shadow-xl transition-all duration-300">
+              <h3 className="text-lg font-semibold text-primary-100 mb-3">Seller Information</h3>
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => onSellerClick && onSellerClick(seller)}
+                className="w-full text-left hover:bg-primary-800/30 rounded-lg p-2 -m-2 transition-colors group"
+              >
+                <div className="flex items-center space-x-3 mb-4">
+                  <div className="w-12 h-12 bg-primary-800/50 rounded-full flex items-center justify-center overflow-hidden">
+                    {seller.avatar ? (
+                      <img
+                        src={seller.avatar}
+                        alt={seller.username}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <User className="w-6 h-6 text-primary-300" />
                     )}
                   </div>
+                  <div>
+                    <p className="font-medium text-primary-200 group-hover:text-blue-300 transition-colors">@{seller.username}</p>
+                    <div className="text-sm text-primary-400">
+                      <p>Listed {formatTimeAgo(listing.createdAt)}</p>
+                      {listing.lastEditedAt && (
+                        <p className="text-yellow-400">
+                          Last edited {formatTimeAgo(listing.lastEditedAt)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-              
-              {/* Contact Info */}
-              <div className="space-y-2">
-                {seller.phone && (
-                  <div className="flex items-center space-x-2 text-sm text-primary-300">
-                    <Phone className="w-4 h-4" />
-                    <span>{seller.phone}</span>
-                  </div>
-                )}
-                {seller.location && (
-                  <div className="flex items-center space-x-2 text-sm text-primary-300">
-                    <MapPin className="w-4 h-4" />
-                    <span>{seller.location}</span>
-                  </div>
-                )}
-              </div>
+                
+                {/* Contact Info */}
+                <div className="space-y-2">
+                  {seller.phone && (
+                    <div className="flex items-center space-x-2 text-sm text-primary-300">
+                      <Phone className="w-4 h-4" />
+                      <span>{seller.phone}</span>
+                    </div>
+                  )}
+                  {seller.location && (
+                    <div className="flex items-center space-x-2 text-sm text-primary-300">
+                      <MapPin className="w-4 h-4" />
+                      <span>{seller.location}</span>
+                    </div>
+                  )}
+                </div>
+              </motion.button>
             </div>
 
             {/* Listing Stats */}

@@ -44,8 +44,10 @@ export interface Listing {
   description: string;
   price: number;
   originalPrice?: number;
-  priceHistory?: Array<{
-    price: number;
+  history: Array<{
+    type: 'price_change' | 'title_update' | 'description_update' | 'problems_update' | 'features_update' | 'tags_update';
+    oldValue: any;
+    newValue: any;
     changedAt: string;
   }>;
   lastEditedAt?: string;
@@ -187,6 +189,7 @@ export interface AppState {
   isAuthenticated: boolean;
   loading: boolean;
   error: string | null;
+  notifications: Notification[];
 }
 
 export interface Review {
@@ -210,6 +213,19 @@ export interface Sale {
   finalPrice: number;
   completedAt: string;
   vehicle?: Vehicle;
+}
+
+export interface Notification {
+  id: string;
+  type: 'success' | 'error' | 'warning' | 'info' | 'message' | 'trade';
+  title: string;
+  message?: string;
+  duration?: number; // in milliseconds, 0 for persistent
+  timestamp: number;
+  read?: boolean;
+  actionLabel?: string;
+  onAction?: () => void;
+  data?: any; // for storing additional data like message/trade info
 }
 
 export type NavigationTab = 'garage' | 'listings' | 'auctions' | 'trades' | 'messages' | 'profile'; 

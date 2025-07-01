@@ -9,10 +9,9 @@ import { AuctionsView } from './components/auctions/AuctionsView.tsx';
 import { TradesView } from './components/trades/TradesView.tsx';
 import { MessagesView } from './components/messages/MessagesView.tsx';
 import { ProfileView } from './components/profile/ProfileView.tsx';
+import { NotificationContainer } from './components/common/NotificationContainer.tsx';
 
-// Placeholder components for other views
-
-function App() {
+function AppContent() {
   const { state, activeTab } = useApp();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isNavHovered, setIsNavHovered] = useState(false);
@@ -103,8 +102,15 @@ function App() {
           </div>
         )}
       </motion.main>
+      
+      {/* Global notification container */}
+      <NotificationContainer />
     </div>
   );
+}
+
+function App() {
+  return <AppContent />;
 }
 
 export default App; 

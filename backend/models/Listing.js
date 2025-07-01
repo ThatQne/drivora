@@ -31,12 +31,14 @@ const listingSchema = new mongoose.Schema({
     type: Number,
     min: 0
   },
-  priceHistory: [{
-    price: {
-      type: Number,
-      required: true,
-      min: 0
+  history: [{
+    type: {
+      type: String,
+      enum: ['price_change', 'title_update', 'description_update', 'problems_update', 'features_update', 'tags_update'],
+      required: true
     },
+    oldValue: mongoose.Schema.Types.Mixed,
+    newValue: mongoose.Schema.Types.Mixed,
     changedAt: {
       type: Date,
       default: Date.now
@@ -98,6 +100,10 @@ const listingSchema = new mongoose.Schema({
   deactivatedReason: {
     type: String,
     trim: true
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
   }
 }, {
   timestamps: true
@@ -151,33 +157,97 @@ listingSchema.methods.incrementViews = function() {
 // Method to renew listing
 listingSchema.methods.renew = function() {
   if (!this.canRenew) {
-    throw new Error('Cannot renew listing yet. Must wait 24 hours.');
+    throw new Error('Cannot renew listing yet. Must wait 12 hours.');
   }
   
-  this.lastRenewed = new Date();
-  this.canRenewAfter = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  // Update timestamps to move listing to top
+  const now = new Date();
+  this.lastRenewed = now;
+  this.canRenewAfter = new Date(now.getTime() + 12 * 60 * 60 * 1000); // 12 hours
+  this.updatedAt = now; // This will move it to the top in "newest" sort
   return this.save();
 };
 
-// Pre-save middleware to track price changes and set original price
+// Pre-save middleware to track changes
 listingSchema.pre('save', function(next) {
   // Set original price on first save
   if (this.isNew && this.price && !this.originalPrice) {
     this.originalPrice = this.price;
-    this.priceHistory = [{ price: this.price, changedAt: new Date() }];
+    this.history = [{
+      type: 'price_change',
+      oldValue: null,
+      newValue: this.price,
+      changedAt: new Date()
+    }];
   }
   
-  // Track price changes on updates
-  if (!this.isNew && this.isModified('price')) {
-    this.priceHistory.push({ price: this.price, changedAt: new Date() });
-    this.lastEditedAt = new Date();
-  }
-  
-  // Track other field changes
-  if (!this.isNew && (this.isModified('title') || this.isModified('description') || 
-                      this.isModified('problems') || this.isModified('additionalFeatures') || 
-                      this.isModified('tags'))) {
-    this.lastEditedAt = new Date();
+  // Track changes on updates
+  if (!this.isNew) {
+    const modifiedPaths = this.modifiedPaths();
+    
+    if (this.isModified('price')) {
+      const oldPrice = this.get('price', null, { getters: false });
+      this.history.push({
+        type: 'price_change',
+        oldValue: oldPrice,
+        newValue: this.price,
+        changedAt: new Date()
+      });
+    }
+    
+    if (this.isModified('title')) {
+      const oldTitle = this.get('title', null, { getters: false });
+      this.history.push({
+        type: 'title_update',
+        oldValue: oldTitle,
+        newValue: this.title,
+        changedAt: new Date()
+      });
+    }
+    
+    if (this.isModified('description')) {
+      const oldDescription = this.get('description', null, { getters: false });
+      this.history.push({
+        type: 'description_update',
+        oldValue: oldDescription,
+        newValue: this.description,
+        changedAt: new Date()
+      });
+    }
+    
+    if (this.isModified('problems')) {
+      const oldProblems = this.get('problems', null, { getters: false });
+      this.history.push({
+        type: 'problems_update',
+        oldValue: oldProblems,
+        newValue: this.problems,
+        changedAt: new Date()
+      });
+    }
+    
+    if (this.isModified('additionalFeatures')) {
+      const oldFeatures = this.get('additionalFeatures', null, { getters: false });
+      this.history.push({
+        type: 'features_update',
+        oldValue: oldFeatures,
+        newValue: this.additionalFeatures,
+        changedAt: new Date()
+      });
+    }
+    
+    if (this.isModified('tags')) {
+      const oldTags = this.get('tags', null, { getters: false });
+      this.history.push({
+        type: 'tags_update',
+        oldValue: oldTags,
+        newValue: this.tags,
+        changedAt: new Date()
+      });
+    }
+    
+    if (modifiedPaths.length > 0) {
+      this.lastEditedAt = new Date();
+    }
   }
   
   next();

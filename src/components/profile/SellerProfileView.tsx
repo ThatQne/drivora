@@ -24,73 +24,82 @@ interface SellerProfileViewProps {
   sellerId: string;
   onBack: () => void;
   onListingClick?: (listing: Listing) => void;
+  source?: 'listings' | 'messages' | 'trades' | 'auctions';
 }
 
-export function SellerProfileView({ sellerId, onBack, onListingClick }: SellerProfileViewProps) {
+export function SellerProfileView({ sellerId, onBack, onListingClick, source }: SellerProfileViewProps) {
   const { state, getUserProfile } = useApp();
   const [activeTab, setActiveTab] = useState<'listings' | 'auctions' | 'reviews' | 'sales'>('listings');
   const [loading, setLoading] = useState(true);
   
-  // Debug seller lookup
-  console.log('SellerProfileView - sellerId:', sellerId);
-  console.log('SellerProfileView - available users:', state.users.map(u => ({ id: u.id, username: u.username })));
-  console.log('SellerProfileView - current user:', state.currentUser ? { id: state.currentUser.id, username: state.currentUser.username } : null);
-  
-  // Try multiple ways to find the seller
-  let seller = getUserProfile(sellerId);
-  
-  // If not found, try to find in allListings populated seller data
-  if (!seller) {
-    console.log('Seller not found in users, checking listings...');
-    const listingWithSeller = state.allListings.find(listing => {
-      const listingSellerId = typeof listing.sellerId === 'object' ? 
-        (listing.sellerId as any).id || (listing.sellerId as any)._id :
-        listing.sellerId;
-      return listingSellerId === sellerId;
-    });
+  // Memoize seller lookup to prevent re-renders
+  const seller = useMemo(() => {
+    console.log('SellerProfileView - sellerId:', sellerId);
+    console.log('SellerProfileView - available users:', state.users.map(u => ({ id: u.id, username: u.username })));
+    console.log('SellerProfileView - current user:', state.currentUser ? { id: state.currentUser.id, username: state.currentUser.username } : null);
     
-    if (listingWithSeller && (listingWithSeller as any).seller) {
-      seller = (listingWithSeller as any).seller;
-      console.log('Found seller in listing data:', seller);
+    // Try multiple ways to find the seller
+    let foundSeller = getUserProfile(sellerId);
+    
+    // If not found, try to find in allListings populated seller data
+    if (!foundSeller) {
+      console.log('Seller not found in users, checking listings...');
+      const listingWithSeller = state.allListings.find(listing => {
+        const listingSellerId = typeof listing.sellerId === 'object' ? 
+          (listing.sellerId as any).id || (listing.sellerId as any)._id :
+          listing.sellerId;
+        return listingSellerId === sellerId;
+      });
+      
+      if (listingWithSeller && (listingWithSeller as any).seller) {
+        foundSeller = (listingWithSeller as any).seller;
+        console.log('Found seller in listing data:', foundSeller);
+      }
     }
-  }
-  
-  // If still not found and sellerId matches current user, use current user
-  if (!seller && state.currentUser && state.currentUser.id === sellerId) {
-    seller = state.currentUser;
-    console.log('Using current user as seller');
-  }
+    
+    // If still not found and sellerId matches current user, use current user
+    if (!foundSeller && state.currentUser && state.currentUser.id === sellerId) {
+      foundSeller = state.currentUser;
+      console.log('Using current user as seller');
+    }
+    
+    return foundSeller;
+  }, [sellerId, state.users, state.currentUser, state.allListings, getUserProfile]);
 
   // Get seller's data
   const sellerListings = useMemo(() => {
+    if (!seller) return [];
     return state.allListings.filter(listing => {
       const listingSellerId = typeof listing.sellerId === 'object' ? 
         (listing.sellerId as any).id || (listing.sellerId as any)._id :
         listing.sellerId;
       return listingSellerId === sellerId && listing.isActive;
     });
-  }, [state.allListings, sellerId]);
+  }, [seller, sellerId, state.allListings]);
 
   const sellerAuctions = useMemo(() => {
+    if (!seller) return [];
     return state.auctions.filter(auction => {
       const auctionSellerId = typeof auction.sellerId === 'object' ? 
         (auction.sellerId as any).id || (auction.sellerId as any)._id :
         auction.sellerId;
       return auctionSellerId === sellerId && auction.isActive;
     });
-  }, [state.auctions, sellerId]);
+  }, [seller, sellerId, state.auctions]);
 
   const sellerReviews = useMemo(() => {
+    if (!seller) return [];
     return state.reviews.filter(review => {
       const revieweeId = typeof review.revieweeId === 'object' ? 
         (review.revieweeId as any).id || (review.revieweeId as any)._id :
         review.revieweeId;
       return revieweeId === sellerId;
     });
-  }, [state.reviews, sellerId]);
+  }, [seller, sellerId, state.reviews]);
 
   // Mock sales data - in real app this would come from API
   const sellerSales = useMemo((): Sale[] => {
+    if (!seller) return [];
     // For now, we'll create mock completed sales based on inactive listings
     const completedListings = state.allListings.filter(listing => {
       const listingSellerId = typeof listing.sellerId === 'object' ? 
@@ -113,7 +122,7 @@ export function SellerProfileView({ sellerId, onBack, onListingClick }: SellerPr
       completedAt: listing.soldAt!,
       vehicle: state.vehicles.find(v => v.id === listing.vehicleId)
     }));
-  }, [state.allListings, state.vehicles, sellerId]);
+  }, [seller, sellerId, state.allListings, state.vehicles]);
 
   useEffect(() => {
     // Simulate loading time
@@ -415,7 +424,7 @@ export function SellerProfileView({ sellerId, onBack, onListingClick }: SellerPr
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="space-y-6"
+      className={`space-y-6 ${source === 'messages' ? 'p-6' : ''}`}
     >
       {/* Back Button */}
       <button
@@ -423,7 +432,12 @@ export function SellerProfileView({ sellerId, onBack, onListingClick }: SellerPr
         className="btn-secondary flex items-center space-x-2"
       >
         <ArrowLeft className="w-5 h-5" />
-        <span>Back to Listings</span>
+        <span>
+          {source === 'messages' ? 'Back to Messages' :
+           source === 'trades' ? 'Back to Trades' :
+           source === 'auctions' ? 'Back to Auctions' :
+           'Back to Listings'}
+        </span>
       </button>
 
       {/* Profile Header */}

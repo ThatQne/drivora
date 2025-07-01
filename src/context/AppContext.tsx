@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useReducer, useEffect, ReactNode, useState, useMemo, useCallback, useRef } from 'react';
-import { AppState, User, Vehicle, Listing, Auction, Trade, Message, Conversation, Review, NavigationTab } from '../types/index.ts';
+import React, { createContext, useContext, useReducer, useEffect, useMemo, useCallback, useRef, useState, ReactNode } from 'react';
+import { AppState, User, Vehicle, Listing, Auction, Trade, Message, Conversation, Review, NavigationTab, Notification } from '../types/index.ts';
 import { AuthService } from '../services/authService.ts';
 import { DataService } from '../services/dataService.ts';
 import ApiService from '../services/apiService.ts';
@@ -45,6 +45,8 @@ interface AppContextType {
   cleanupVehicleFlags: () => Promise<{ message: string; cleanedCount: number }>;
   activeTab: NavigationTab;
   setActiveTab: (tab: NavigationTab) => void;
+  activeConversation: string | null;
+  setActiveConversation: (conversationId: string | null) => void;
   loadUserMessages: () => Promise<void>;
   loadMessagesOnTabSwitch: () => Promise<void>;
   loadGarageData: () => Promise<void>;
@@ -54,6 +56,17 @@ interface AppContextType {
   // Trade helper functions
   isVehicleInPendingTrade: (vehicleId: string) => boolean;
   getVehicleTradeStatus: (vehicleId: string) => { inTrade: boolean; tradeId?: string; tradeStatus?: string };
+  // Notification functions
+  addNotification: (notification: Omit<Notification, 'id' | 'timestamp'>) => void;
+  removeNotification: (id: string) => void;
+  markNotificationRead: (id: string) => void;
+  clearAllNotifications: () => void;
+  showSuccess: (title: string, message?: string, duration?: number) => void;
+  showError: (title: string, message?: string, duration?: number) => void;
+  showWarning: (title: string, message?: string, duration?: number) => void;
+  showInfo: (title: string, message?: string, duration?: number) => void;
+  showMessageNotification: (message: Message, sender: User) => void;
+  showTradeNotification: (trade: Trade, otherUser: User) => void;
 }
 
 type AppAction = 
@@ -80,7 +93,11 @@ type AppAction =
   | { type: 'SET_CONVERSATIONS'; payload: Conversation[] }
   | { type: 'SET_REVIEWS'; payload: Review[] }
   | { type: 'SET_USERS'; payload: User[] }
-  | { type: 'SET_ACTIVE_TAB'; payload: NavigationTab };
+  | { type: 'SET_ACTIVE_TAB'; payload: NavigationTab }
+  | { type: 'ADD_NOTIFICATION'; payload: Notification }
+  | { type: 'REMOVE_NOTIFICATION'; payload: string }
+  | { type: 'MARK_NOTIFICATION_READ'; payload: string }
+  | { type: 'CLEAR_ALL_NOTIFICATIONS' };
 
 const initialState: AppState = {
   currentUser: null,
@@ -97,6 +114,7 @@ const initialState: AppState = {
   isAuthenticated: false,
   loading: false,
   error: null,
+  notifications: [],
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -234,6 +252,9 @@ function appReducer(state: AppState, action: AppAction): AppState {
           updatedAt: new Date().toISOString(),
         };
         updatedConversations = [...state.conversations, newConversation];
+        
+        // Set flag to indicate this is a new conversation for notification purposes
+        (newMessage as any).isNewConversation = true;
       }
       
       // 🚨 CRITICAL FIX: Preserve conversations that might have been created from fallback logic
@@ -380,6 +401,31 @@ function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         allListings: action.payload
       };
+    case 'ADD_NOTIFICATION':
+      return {
+        ...state,
+        notifications: [action.payload, ...state.notifications]
+      };
+      
+    case 'REMOVE_NOTIFICATION':
+      return {
+        ...state,
+        notifications: state.notifications.filter(n => n.id !== action.payload)
+      };
+      
+    case 'MARK_NOTIFICATION_READ':
+      return {
+        ...state,
+        notifications: state.notifications.map(n => 
+          n.id === action.payload ? { ...n, read: true } : n
+        )
+      };
+      
+    case 'CLEAR_ALL_NOTIFICATIONS':
+      return {
+        ...state,
+        notifications: []
+      };
     default:
       return state;
   }
@@ -394,6 +440,16 @@ interface AppProviderProps {
 export function AppProvider({ children }: AppProviderProps) {
   const [state, dispatch] = useReducer(appReducer, initialState);
   const [activeTab, setActiveTab] = React.useState<NavigationTab>('garage');
+  const [activeConversation, setActiveConversation] = React.useState<string | null>(null);
+  
+  // Add ref to track current active conversation
+  const activeConversationRef = useRef<string | null>(null);
+  
+  // Update ref when activeConversation changes
+  useEffect(() => {
+    activeConversationRef.current = activeConversation;
+  }, [activeConversation]);
+
   const [listingsCache, setListingsCache] = useState<{
     data: any[];
     timestamp: number;
@@ -411,6 +467,46 @@ export function AppProvider({ children }: AppProviderProps) {
   // Use a ref to store current state for WebSocket callbacks to avoid stale closures
   const stateRef = useRef(state);
   stateRef.current = state;
+
+  // Track recent notifications to prevent duplicates
+  const recentNotifications = useRef<Set<string>>(new Set());
+  
+  const addNotificationWithDeduplication = useCallback((notification: Omit<Notification, 'id' | 'timestamp'>) => {
+    // Create a unique key for this notification
+    const notificationKey = `${notification.type}-${notification.title}-${notification.message}`;
+    
+    // Check if we've shown this notification recently (within last 5 seconds)
+    if (recentNotifications.current.has(notificationKey)) {
+      console.log('🔄 Skipping duplicate notification:', notificationKey);
+      return;
+    }
+    
+    // Add to recent notifications
+    recentNotifications.current.add(notificationKey);
+    
+    // Remove from recent notifications after 5 seconds
+    setTimeout(() => {
+      recentNotifications.current.delete(notificationKey);
+    }, 5000);
+    
+    // Add the actual notification
+    const id = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    const fullNotification: Notification = {
+      ...notification,
+      id,
+      timestamp: Date.now(),
+      duration: notification.duration ?? 5000 // default 5 seconds
+    };
+    
+    dispatch({ type: 'ADD_NOTIFICATION', payload: fullNotification });
+    
+    // Auto-remove notification after duration (if not persistent)
+    if (fullNotification.duration && fullNotification.duration > 0) {
+      setTimeout(() => {
+        dispatch({ type: 'REMOVE_NOTIFICATION', payload: id });
+      }, fullNotification.duration);
+    }
+  }, []);
 
   // 🔗 WEBSOCKET INTEGRATION: Setup real-time updates
   useEffect(() => {
@@ -502,8 +598,14 @@ export function AppProvider({ children }: AppProviderProps) {
             const tradeWithId = { ...trade, id: trade._id || trade.id };
             
             // Add to trades if current user is involved
-            if (trade.offererUserId === state.currentUser?.id || trade.receiverUserId === state.currentUser?.id) {
-              dispatch({ type: 'ADD_TRADE', payload: tradeWithId });
+            if (trade.offererUserId === stateRef.current.currentUser?.id || trade.receiverUserId === stateRef.current.currentUser?.id) {
+              // Check if trade already exists to prevent duplicates
+              const tradeExists = stateRef.current.trades.some(t => t.id === tradeWithId.id);
+              if (!tradeExists) {
+                dispatch({ type: 'ADD_TRADE', payload: tradeWithId });
+              } else {
+                console.log('🔄 Trade already exists, skipping duplicate:', tradeWithId.id);
+              }
             }
           },
 
@@ -512,7 +614,7 @@ export function AppProvider({ children }: AppProviderProps) {
             const tradeWithId = { ...trade, id: trade._id || trade.id };
             
             // Update trade if current user is involved
-            if (trade.offererUserId === state.currentUser?.id || trade.receiverUserId === state.currentUser?.id) {
+            if (trade.offererUserId === stateRef.current.currentUser?.id || trade.receiverUserId === stateRef.current.currentUser?.id) {
               dispatch({ type: 'UPDATE_TRADE', payload: tradeWithId });
             }
           },
@@ -525,7 +627,7 @@ export function AppProvider({ children }: AppProviderProps) {
             dispatch({ type: 'UPDATE_TRADE', payload: tradeWithId });
             
             // If current user was involved, reload garage to show new cars
-            if (trade.offererUserId === state.currentUser?.id || trade.receiverUserId === state.currentUser?.id) {
+            if (trade.offererUserId === stateRef.current.currentUser?.id || trade.receiverUserId === stateRef.current.currentUser?.id) {
               console.log('🚗 Reloading garage after trade completion...');
               setTimeout(async () => {
                 try {
@@ -549,8 +651,79 @@ export function AppProvider({ children }: AppProviderProps) {
             const senderId = typeof message.senderId === 'object' ? message.senderId.id : message.senderId;
             const receiverId = typeof message.receiverId === 'object' ? message.receiverId.id : message.receiverId;
             
-            if (senderId === state.currentUser?.id || receiverId === state.currentUser?.id) {
+            if (senderId === stateRef.current.currentUser?.id || receiverId === stateRef.current.currentUser?.id) {
               dispatch({ type: 'ADD_MESSAGE', payload: messageWithId });
+              
+              // Show notification for incoming messages (not sent by current user)
+              if (receiverId === stateRef.current.currentUser?.id && senderId !== stateRef.current.currentUser?.id) {
+                // Find the sender user
+                const senderUser = stateRef.current.users.find(u => u.id === senderId) || 
+                  (typeof message.senderId === 'object' ? { 
+                    ...message.senderId, 
+                    id: message.senderId.id || message.senderId._id 
+                  } : null);
+                
+                if (senderUser) {
+                  // Check if user is currently on messages tab
+                  const isOnMessagesTab = activeTab === 'messages';
+                  
+                  // Generate conversation ID to check if user is in this specific conversation
+                  const conversationId = [senderId, receiverId].sort().join('-');
+                  const isInActiveConversation = activeConversationRef.current === conversationId;
+                  
+                  // Debug logging to troubleshoot the issue
+                  console.log('🔍 NOTIFICATION DEBUG:', {
+                    messageFrom: senderUser.username,
+                    senderId,
+                    receiverId,
+                    currentUserId: stateRef.current.currentUser?.id,
+                    generatedConversationId: conversationId,
+                    activeConversation: activeConversationRef.current,
+                    isInActiveConversation,
+                    isOnMessagesTab,
+                    willShowNotification: !isOnMessagesTab || !isInActiveConversation
+                  });
+                  
+                  // Show notification if:
+                  // 1. Not on messages tab, OR
+                  // 2. On messages tab but not in this specific conversation
+                  if (!isOnMessagesTab || !isInActiveConversation) {
+                    console.log('📨 Showing message notification from @' + senderUser.username, {
+                      isOnMessagesTab,
+                      isInActiveConversation,
+                      activeConversation: activeConversationRef.current,
+                      conversationId,
+                      senderId,
+                      receiverId,
+                      currentUserId: stateRef.current.currentUser?.id
+                    });
+                    
+                    addNotificationWithDeduplication({
+                      type: 'message',
+                      title: `New message from @${senderUser.username}`,
+                      message: messageWithId.content.length > 50 ? messageWithId.content.substring(0, 50) + '...' : messageWithId.content,
+                      duration: 8000,
+                      actionLabel: 'View',
+                      onAction: () => {
+                        setActiveTab('messages');
+                      },
+                      data: { message: messageWithId, sender: senderUser }
+                    });
+                  } else {
+                    console.log('📨 Not showing notification - user is in active conversation:', {
+                      isOnMessagesTab,
+                      isInActiveConversation,
+                      activeConversation: activeConversationRef.current,
+                      conversationId,
+                      senderId,
+                      receiverId,
+                      currentUserId: stateRef.current.currentUser?.id
+                    });
+                  }
+                } else {
+                  console.warn('📨 Could not find sender user for notification:', senderId);
+                }
+              }
             }
           },
 
@@ -559,7 +732,7 @@ export function AppProvider({ children }: AppProviderProps) {
             console.log('🚗 Real-time: New vehicle added by user:', userId);
             
             // Only update if it's current user's vehicle
-            if (userId === state.currentUser?.id) {
+            if (userId === stateRef.current.currentUser?.id) {
               const vehicleWithId = { ...vehicle, id: vehicle._id || vehicle.id };
               dispatch({ type: 'ADD_VEHICLE', payload: vehicleWithId });
             }
@@ -569,7 +742,7 @@ export function AppProvider({ children }: AppProviderProps) {
             console.log('🚗 Real-time: Vehicle updated by user:', userId);
             
             // Only update if it's current user's vehicle
-            if (userId === state.currentUser?.id) {
+            if (userId === stateRef.current.currentUser?.id) {
               const vehicleWithId = { ...vehicle, id: vehicle._id || vehicle.id };
               dispatch({ type: 'UPDATE_VEHICLE', payload: vehicleWithId });
             }
@@ -603,7 +776,7 @@ export function AppProvider({ children }: AppProviderProps) {
         webSocketService.disconnect();
       }
     };
-  }, [state.currentUser, state.isAuthenticated]);
+  }, [state.currentUser, state.isAuthenticated, activeTab, addNotificationWithDeduplication, setActiveTab]);
 
   // Disconnect WebSocket on logout
   useEffect(() => {
@@ -1243,6 +1416,19 @@ export function AppProvider({ children }: AppProviderProps) {
         dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
         console.log('📋 Listing updated in marketplace');
       }
+
+      // 🚗 SMART UPDATE: Update vehicle listing status
+      const vehicle = state.vehicles.find(v => v.id === listing.vehicleId);
+      if (vehicle) {
+        const updatedVehicle: Vehicle = {
+          ...vehicle,
+          isListed: true, // Keep it listed since we're just updating
+          listingId: listing.id,
+          updatedAt: new Date().toISOString(),
+        };
+        dispatch({ type: 'UPDATE_VEHICLE', payload: updatedVehicle });
+        console.log('🚗 Vehicle listing status maintained in garage');
+      }
       
       console.log('✅ Listing updated with smart updates - no API refresh needed');
       
@@ -1298,11 +1484,11 @@ export function AppProvider({ children }: AppProviderProps) {
       
       // 📋 SMART UPDATE: Update in all listings if we have them loaded
       if (state.allListings.length > 0) {
-        const updatedAllListings = state.allListings.map(l => 
-          l.id === renewedListing.id ? renewedListing : l
-        );
+        // Move the renewed listing to the top and update its data
+        const otherListings = state.allListings.filter(l => l.id !== renewedListing.id);
+        const updatedAllListings = [renewedListing, ...otherListings];
         dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
-        console.log('📋 Listing renewed in marketplace');
+        console.log('📋 Listing renewed and moved to top in marketplace');
       }
       
       console.log('✅ Listing renewed with smart updates - no API refresh needed');
@@ -1373,7 +1559,7 @@ export function AppProvider({ children }: AppProviderProps) {
       
       // 🚀 FALLBACK: Add message locally immediately in case WebSocket is delayed
       // This ensures the sender sees their message right away
-      const messageWithId = { ...newMessage, id: newMessage._id || newMessage.id };
+      const messageWithId = { ...newMessage, id: (newMessage as any)._id || newMessage.id };
       dispatch({ type: 'ADD_MESSAGE', payload: messageWithId });
       console.log('📨 Added sent message to local state as fallback');
       
@@ -1623,7 +1809,7 @@ export function AppProvider({ children }: AppProviderProps) {
       console.log('❓ Missing user IDs after adding populated users (excluding current user):', missingUserIds);
       
       // Ensure current user is in users array
-      if (state.currentUser && !allUsers.find(u => u.id === state.currentUser.id)) {
+      if (state.currentUser && !allUsers.find(u => u.id === state.currentUser!.id)) {
         allUsers.push(state.currentUser);
         console.log('👤 Added current user to users array');
       }
@@ -1940,6 +2126,69 @@ export function AppProvider({ children }: AppProviderProps) {
     }
   };
 
+  // Notification functions
+  const addNotification = useCallback((notification: Omit<Notification, 'id' | 'timestamp'>) => {
+    // Use the deduplicated version
+    addNotificationWithDeduplication(notification);
+  }, [addNotificationWithDeduplication]);
+
+  const removeNotification = useCallback((id: string) => {
+    dispatch({ type: 'REMOVE_NOTIFICATION', payload: id });
+  }, []);
+
+  const markNotificationRead = useCallback((id: string) => {
+    dispatch({ type: 'MARK_NOTIFICATION_READ', payload: id });
+  }, []);
+
+  const clearAllNotifications = useCallback(() => {
+    dispatch({ type: 'CLEAR_ALL_NOTIFICATIONS' });
+  }, []);
+
+  // Convenience functions for common notification types
+  const showSuccess = useCallback((title: string, message?: string, duration?: number) => {
+    addNotification({ type: 'success', title, message, duration });
+  }, [addNotification]);
+
+  const showError = useCallback((title: string, message?: string, duration?: number) => {
+    addNotification({ type: 'error', title, message, duration: duration ?? 7000 });
+  }, [addNotification]);
+
+  const showWarning = useCallback((title: string, message?: string, duration?: number) => {
+    addNotification({ type: 'warning', title, message, duration });
+  }, [addNotification]);
+
+  const showInfo = useCallback((title: string, message?: string, duration?: number) => {
+    addNotification({ type: 'info', title, message, duration });
+  }, [addNotification]);
+
+  const showMessageNotification = useCallback((message: Message, sender: User) => {
+    addNotification({
+      type: 'message',
+      title: `New message from @${sender.username}`,
+      message: message.content.length > 50 ? message.content.substring(0, 50) + '...' : message.content,
+      duration: 8000,
+      actionLabel: 'View',
+      onAction: () => {
+        // Navigate to messages - this would be handled by the component using this
+      },
+      data: { message, sender }
+    });
+  }, [addNotification]);
+
+  const showTradeNotification = useCallback((trade: Trade, otherUser: User) => {
+    addNotification({
+      type: 'trade',
+      title: `New trade offer from @${otherUser.username}`,
+      message: `Trade offer for your listing`,
+      duration: 10000,
+      actionLabel: 'View Trade',
+      onAction: () => {
+        // Navigate to trades - this would be handled by the component using this
+      },
+      data: { trade, otherUser }
+    });
+  }, [addNotification]);
+
   // Memoize the context value to prevent unnecessary re-renders
   const contextValue = useMemo(() => ({
     state,
@@ -1986,6 +2235,8 @@ export function AppProvider({ children }: AppProviderProps) {
     cleanupVehicleFlags,
     activeTab,
     setActiveTab,
+    activeConversation,
+    setActiveConversation,
     reloadTrades,
     loadUserMessages,
     loadMessagesOnTabSwitch,
@@ -2127,7 +2378,18 @@ export function AppProvider({ children }: AppProviderProps) {
     checkForNewMessages,
     isVehicleInPendingTrade,
     getVehicleTradeStatus,
-  }), [state, dispatch, login, logout, updateUser, addVehicle, updateVehicle, deleteVehicle, addListing, updateListing, deleteListing, renewListing, incrementListingViews, loadAllListings, addReview, getUserProfile, sendMessage, markMessagesAsRead, addTrade, updateTrade, deleteTrade, cleanupCorruptedTrades, cleanupVehicleFlags, activeTab, setActiveTab, reloadTrades, loadUserMessages, loadMessagesOnTabSwitch, checkForNewMessages]);
+    // Notification functions
+    addNotification,
+    removeNotification,
+    markNotificationRead,
+    clearAllNotifications,
+    showSuccess,
+    showError,
+    showWarning,
+    showInfo,
+    showMessageNotification,
+    showTradeNotification,
+  }), [state, dispatch, login, logout, updateUser, addVehicle, updateVehicle, deleteVehicle, addListing, updateListing, deleteListing, renewListing, incrementListingViews, loadAllListings, addReview, getUserProfile, sendMessage, markMessagesAsRead, addTrade, updateTrade, deleteTrade, cleanupCorruptedTrades, cleanupVehicleFlags, activeTab, setActiveTab, activeConversation, setActiveConversation, reloadTrades, loadUserMessages, loadMessagesOnTabSwitch, checkForNewMessages, addNotification, removeNotification, markNotificationRead, clearAllNotifications, showSuccess, showError, showWarning, showInfo, showMessageNotification, showTradeNotification]);
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>;
 }

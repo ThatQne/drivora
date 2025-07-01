@@ -90,6 +90,12 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
   ];
 
   const handleTabClick = async (tab: NavigationTab) => {
+    // If clicking the same tab (Messages), reset the selected conversation
+    if (tab === 'messages' && activeTab === 'messages') {
+      // Dispatch a custom event to reset the selected conversation
+      window.dispatchEvent(new CustomEvent('resetMessagesConversation'));
+    }
+    
     // Set the tab immediately for instant response
     setActiveTab(tab);
     

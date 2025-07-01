@@ -216,6 +216,7 @@ export function ListingsView() {
           // Open the specific listing
           handleListingClick(listing);
         }}
+        source="listings"
       />
     );
   }
@@ -486,7 +487,7 @@ export function ListingsView() {
                             e.stopPropagation();
                             handleSellerClick(listing.seller);
                           }}
-                          className="flex items-center space-x-2 hover:bg-primary-800/30 rounded-lg p-2 -m-2 transition-colors"
+                          className="flex items-center space-x-2 hover:bg-primary-800/30 rounded-lg p-2 -m-2 transition-colors group"
                         >
                           <div className="w-8 h-8 bg-primary-800/50 rounded-full flex items-center justify-center overflow-hidden">
                             {listing.seller?.avatar ? (
@@ -501,7 +502,7 @@ export function ListingsView() {
                           </div>
                           <div className="text-left">
                             <div className="flex items-center space-x-2">
-                              <p className="text-sm font-medium text-primary-200 hover:text-primary-100 transition-colors">
+                              <p className="text-sm font-medium text-primary-200 group-hover:text-blue-300 transition-colors">
                                 @{listing.seller.username}
                               </p>
                               {/* Seller Rating with Circles */}
@@ -565,6 +566,7 @@ export function ListingsView() {
             onClose={() => setSelectedListing(null)}
             onContact={handleContactSeller}
             onTrade={handleTradeOffer}
+            onSellerClick={handleSellerClick}
           />
         )}
       </AnimatePresence>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   MessageCircle, 
@@ -18,6 +18,7 @@ import { useApp } from '../../context/AppContext.tsx';
 import { Message, User as UserType, Conversation } from '../../types/index.ts';
 import ApiService from '../../services/apiService.ts';
 import webSocketService from '../../services/webSocketService.ts';
+import { SellerProfileView } from '../profile/SellerProfileView.tsx';
 
 interface TypingIndicator {
   userId: string;
@@ -34,9 +35,31 @@ interface PendingMessage {
   status: 'sending' | 'sent' | 'failed';
 }
 
+interface MessagePagination {
+  current: number;
+  pages: number;
+  total: number;
+  hasNext: boolean;
+  hasPrev: boolean;
+  loading: boolean;
+  initialLoaded: boolean;
+}
+
 export function MessagesView() {
-  const { state, sendMessage, markMessagesAsRead, checkForNewMessages, dispatch } = useApp();
+    const {
+    state, 
+    sendMessage, 
+    markMessagesAsRead, 
+    checkForNewMessages,
+    loadUserMessages,
+    getUserProfile,
+    dispatch,
+    activeTab,
+    setActiveConversation
+  } = useApp();
+  
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
+  const [selectedSeller, setSelectedSeller] = useState<any>(null);
   const [messageText, setMessageText] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -47,23 +70,18 @@ export function MessagesView() {
   
   // Message pagination state
   const [paginatedMessages, setPaginatedMessages] = useState<{ [conversationId: string]: Message[] }>({});
-  const [messagePagination, setMessagePagination] = useState<{ [conversationId: string]: {
-    current: number;
-    pages: number;
-    total: number;
-    hasNext: boolean;
-    hasPrev: boolean;
-    loading: boolean;
-    initialLoaded: boolean;
-  } }>({});
+  const [messagePagination, setMessagePagination] = useState<Record<string, MessagePagination>>({});
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesTopRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const typingTimeoutRef = useRef<NodeJS.Timeout>();
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lastScrollHeight = useRef<number>(0);
   const messageCheckIntervalRef = useRef<NodeJS.Timeout>();
+
+  // Track previous message count to detect new messages
+  const [previousMessageCount, setPreviousMessageCount] = useState(0);
 
   // Use conversations from state (loaded from API) with fallback to creating from messages
   const conversations = useMemo(() => {
@@ -185,10 +203,13 @@ export function MessagesView() {
 
   // Track when messages/conversations are loaded for the first time
   useEffect(() => {
-    if ((state.messages && state.messages.length > 0) || (state.conversations && state.conversations.length > 0)) {
+    // Stop loading if we have data OR if we've finished loading user data
+    if ((state.messages && state.messages.length > 0) || 
+        (state.conversations && state.conversations.length > 0) ||
+        (state.messages !== null && state.conversations !== null && missingUserIds.length === 0)) {
       setInitialLoad(false);
     }
-  }, [state.messages, state.conversations]);
+  }, [state.messages, state.conversations, missingUserIds]);
 
   // Debug conversation changes
   useEffect(() => {
@@ -200,6 +221,20 @@ export function MessagesView() {
       stateMessagesCount: state.messages?.length || 0
     });
   }, [conversations, selectedConversation, state.conversations, state.messages]);
+
+  // Clear active conversation when leaving messages tab or unmounting
+  useEffect(() => {
+    if (activeTab !== 'messages') {
+      setActiveConversation(null);
+    }
+  }, [activeTab, setActiveConversation]);
+
+  // Clear active conversation on unmount
+  useEffect(() => {
+    return () => {
+      setActiveConversation(null);
+    };
+  }, [setActiveConversation]);
 
   // Sync new messages from global state into paginated messages
   useEffect(() => {
@@ -417,17 +452,61 @@ export function MessagesView() {
   }, [selectedConversation, conversations, state.users, state.currentUser?.id]);
 
   // Auto-scroll to bottom when new messages arrive (but preserve scroll position when loading more)
-  useEffect(() => {
-    if (selectedConversation && currentConversationMessages.length > 0) {
-      const pagination = messagePagination[selectedConversation];
-      // Only auto-scroll if this is the initial load or we're near the bottom
-      if (!pagination || pagination.current === 1) {
-        setTimeout(() => {
-          scrollToBottom();
-        }, 100);
+  const scrollToBottom = (force: boolean = false) => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    
+    if (force) {
+      // For forced scroll (initial load, new messages), always scroll to bottom
+      // Use multiple attempts to ensure it works on mobile
+      const scrollToBottomAttempt = () => {
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: 'auto', // Use 'auto' for instant scroll on initial load
+        });
+      };
+      
+      // Immediate scroll
+      scrollToBottomAttempt();
+      
+      // Additional scroll attempts for mobile
+      setTimeout(scrollToBottomAttempt, 10);
+      setTimeout(scrollToBottomAttempt, 50);
+    } else {
+      // For auto-scroll, check if user is near bottom
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
+      if (isNearBottom) {
+        requestAnimationFrame(() => {
+          container.scrollTo({
+            top: container.scrollHeight,
+            behavior: 'auto',
+          });
+        });
       }
     }
-  }, [currentConversationMessages, selectedConversation]);
+  };
+
+  // Single comprehensive scroll effect that handles all cases
+  useLayoutEffect(() => {
+    if (!selectedConversation || currentConversationMessages.length === 0) return;
+    
+    const pagination = messagePagination[selectedConversation];
+    const isInitialLoad = !pagination || pagination.current === 1;
+    const isReturningFromProfile = selectedConversation && !selectedSeller;
+    
+    // Always scroll to bottom for initial load, new messages, or returning from profile
+    if (isInitialLoad || isReturningFromProfile) {
+      // Use multiple scroll attempts with longer delays for mobile
+      const scrollAttempts = [0, 50, 100, 200, 300, 500];
+      
+      scrollAttempts.forEach(delay => {
+        setTimeout(() => {
+          scrollToBottom(true);
+        }, delay);
+      });
+    }
+  }, [selectedConversation, currentConversationMessages.length, selectedSeller]);
 
   // Preserve scroll position when loading more messages
   useEffect(() => {
@@ -447,6 +526,14 @@ export function MessagesView() {
   useEffect(() => {
     console.log('📱 MessagesView mounted');
     
+    // Listen for reset conversation event
+    const handleResetConversation = () => {
+      setSelectedConversation(null);
+      setActiveConversation(null); // Clear active conversation for notifications
+    };
+    
+    window.addEventListener('resetMessagesConversation', handleResetConversation);
+    
     // DISABLED: Automatic checking causes infinite loops
     // WebSocket handles real-time message updates instead
     // checkForNewMessages();
@@ -458,6 +545,7 @@ export function MessagesView() {
     
     // Cleanup on unmount
     return () => {
+      window.removeEventListener('resetMessagesConversation', handleResetConversation);
       if (messageCheckIntervalRef.current) {
         clearInterval(messageCheckIntervalRef.current);
       }
@@ -516,6 +604,9 @@ export function MessagesView() {
     // Add to pending messages immediately
     setPendingMessages(prev => [...prev, tempMessage]);
     
+    // Scroll to bottom to show the pending message
+    setTimeout(() => scrollToBottom(true), 50);
+    
     // Clear input and reset immediately to allow new messages
     setMessageText('');
     setIsTyping(false);
@@ -537,6 +628,9 @@ export function MessagesView() {
       
       // Remove pending message immediately once sent successfully
       setPendingMessages(prev => prev.filter(msg => msg.id !== tempMessage.id));
+
+      // Scroll to bottom after message is sent
+      setTimeout(() => scrollToBottom(true), 100);
 
       // Log conversation state after sending
       setTimeout(() => {
@@ -622,6 +716,14 @@ export function MessagesView() {
     });
     
     setSelectedConversation(conversationId);
+    setActiveConversation(conversationId); // Set active conversation for notification filtering
+    
+    console.log('🔍 CONVERSATION SELECT DEBUG:', {
+      selectedConversationId: conversationId,
+      currentUserId: state.currentUser?.id,
+      participants: conversation?.participants,
+      willSetActiveConversation: conversationId
+    });
     
     // Load messages for this conversation if not already loaded
     const pagination = messagePagination[conversationId];
@@ -649,6 +751,11 @@ export function MessagesView() {
         console.error('Error marking messages as read:', error);
       }
     }
+  };
+
+  const handleSellerClick = (seller: any) => {
+    // Store the current conversation state before opening profile
+    setSelectedSeller(seller);
   };
 
   const formatTime = (timestamp: string) => {
@@ -885,7 +992,7 @@ export function MessagesView() {
   const renderChatInterface = () => {
     if (!selectedConversation || !selectedConversationUser) {
       return (
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex-1 flex items-center justify-center pt-16">
           <div className="text-center">
             <MessageCircle className="w-16 h-16 mx-auto mb-4 text-primary-400" />
             <h3 className="text-xl font-semibold text-primary-100 mb-2">Select a conversation</h3>
@@ -898,9 +1005,9 @@ export function MessagesView() {
     const typingUsersInConversation = typingUsers.filter(t => t.conversationId === selectedConversation);
 
     return (
-      <div className="flex-1 relative h-full">
-        {/* Chat Header - Fixed at top */}
-        <div className="absolute top-0 left-0 right-0 p-4 border-b border-primary-700/30 bg-primary-900/95 backdrop-blur-sm z-30">
+      <div className="flex-1 flex flex-col h-full relative">
+        {/* Chat Header */}
+        <div className="flex-shrink-0 p-4 border-b border-primary-700/30 bg-primary-900/95 backdrop-blur-sm z-30">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <button
@@ -910,26 +1017,33 @@ export function MessagesView() {
                 <ArrowLeft className="w-5 h-5 text-primary-300" />
               </button>
               
-              <div className="w-10 h-10 bg-primary-800/50 rounded-full flex items-center justify-center">
-                {selectedConversationUser.avatar ? (
-                  <img
-                    src={selectedConversationUser.avatar}
-                    alt={selectedConversationUser.username}
-                    className="w-full h-full object-cover rounded-full"
-                  />
-                ) : (
-                  <User className="w-5 h-5 text-primary-300" />
-                )}
-              </div>
-              
-              <div>
-                <h3 className="font-semibold text-primary-100">
-                  @{selectedConversationUser.username}
-                </h3>
-                {typingUsersInConversation.length > 0 && (
-                  <p className="text-sm text-blue-400">typing...</p>
-                )}
-              </div>
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => handleSellerClick(selectedConversationUser)}
+                className="flex items-center space-x-3 hover:bg-primary-800/30 rounded-lg p-2 -m-2 transition-colors group"
+              >
+                <div className="w-10 h-10 bg-primary-800/50 rounded-full flex items-center justify-center">
+                  {selectedConversationUser.avatar ? (
+                    <img
+                      src={selectedConversationUser.avatar}
+                      alt={selectedConversationUser.username}
+                      className="w-full h-full object-cover rounded-full"
+                    />
+                  ) : (
+                    <User className="w-5 h-5 text-primary-300" />
+                  )}
+                </div>
+                
+                <div>
+                  <h3 className="font-semibold text-primary-100 group-hover:text-blue-300 transition-colors">
+                    @{selectedConversationUser.username}
+                  </h3>
+                  {typingUsersInConversation.length > 0 && (
+                    <p className="text-sm text-blue-400">typing...</p>
+                  )}
+                </div>
+              </motion.button>
             </div>
             
             <div className="flex items-center space-x-2">
@@ -946,8 +1060,177 @@ export function MessagesView() {
           </div>
         </div>
 
-        {/* Message Input - Fixed at bottom */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-primary-700/30 bg-primary-900/95 backdrop-blur-sm z-30">
+        {/* Messages Container */}
+        <div 
+          ref={messagesContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto px-4 py-4 messages-scrollbar"
+        >
+          {/* Loading indicator for pagination */}
+          {selectedConversation && messagePagination[selectedConversation]?.loading && messagePagination[selectedConversation]?.hasPrev && (
+            <div className="flex justify-center py-2">
+              <div className="w-6 h-6 border-2 border-primary-600 border-t-blue-500 rounded-full animate-spin"></div>
+            </div>
+          )}
+          
+          {/* Top ref for infinite scroll */}
+          <div ref={messagesTopRef} />
+          
+          {currentConversationMessages.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="text-center">
+                <p className="text-primary-300">No messages yet</p>
+                <p className="text-sm text-primary-400 mt-1">Send a message to start the conversation</p>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Spacer to push messages to bottom when there are few messages */}
+              <div className="flex-1 min-h-0"></div>
+              
+              {/* Messages */}
+              <div className="space-y-1">
+                {currentConversationMessages.map((message, index) => {
+                  // Ensure we're comparing the correct sender ID (handle both string and object)
+                  const messageSenderId = typeof message.senderId === 'object' ? (message.senderId as any).id : message.senderId;
+                  const isOwn = messageSenderId === state.currentUser?.id;
+                  const isPending = (message as any).isPending;
+                  const pendingStatus = isPending ? (message as any).status : null;
+                  
+                  const previousMessage = index > 0 ? currentConversationMessages[index - 1] : null;
+                  const nextMessage = index < currentConversationMessages.length - 1 ? currentConversationMessages[index + 1] : null;
+                  
+                  const showDateSeparator = shouldShowDateSeparator(message, previousMessage);
+                  const showTimeGroup = shouldShowTimeGroup(message, previousMessage);
+                  const showAvatar = shouldShowAvatar(message, nextMessage, isOwn);
+                  
+                  return (
+                    <React.Fragment key={message.id}>
+                      {/* Date Separator */}
+                      {showDateSeparator && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="flex justify-center my-6"
+                        >
+                          <div className="bg-primary-800/50 px-3 py-1 rounded-full">
+                            <span className="text-xs font-medium text-primary-300">
+                              {formatDateSeparator(message.timestamp)}
+                            </span>
+                          </div>
+                        </motion.div>
+                      )}
+                      
+                      {/* Time Group Separator */}
+                      {showTimeGroup && !showDateSeparator && (
+                        <div className="h-4"></div>
+                      )}
+                      
+                      {/* Message */}
+                      <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={`flex ${isOwn ? 'justify-end' : 'justify-start'} ${
+                          showTimeGroup ? 'mt-2' : 'mt-0.5'
+                        }`}
+                      >
+                        <div className={`flex items-end space-x-2 max-w-xs lg:max-w-md ${isOwn ? 'flex-row-reverse space-x-reverse' : ''}`}>
+                          {/* Avatar */}
+                          <div className="w-8 h-8 flex-shrink-0">
+                            {showAvatar && !isOwn && (
+                              <div className="w-8 h-8 bg-primary-800/50 rounded-full flex items-center justify-center">
+                                {selectedConversationUser.avatar ? (
+                                  <img
+                                    src={selectedConversationUser.avatar}
+                                    alt={selectedConversationUser.username}
+                                    className="w-full h-full object-cover rounded-full"
+                                  />
+                                ) : (
+                                  <User className="w-4 h-4 text-primary-300" />
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* Message Bubble */}
+                          <div
+                            className={`px-4 py-2 rounded-2xl ${
+                              isOwn
+                                ? `bg-blue-600 text-white ${isPending && pendingStatus === 'sending' ? 'opacity-70' : ''} ${isPending && pendingStatus === 'failed' ? 'bg-red-600' : ''}`
+                                : 'bg-primary-700/50 text-primary-100'
+                            } ${
+                              // Adjust border radius for grouped messages
+                              !showTimeGroup && !isOwn && !showAvatar ? 'rounded-tl-md' : ''
+                            } ${
+                              !showTimeGroup && isOwn ? 'rounded-tr-md' : ''
+                            }`}
+                          >
+                            <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                            
+                            {/* Message metadata - only show on last message in time group */}
+                            {(showAvatar || index === currentConversationMessages.length - 1 || 
+                              (nextMessage && shouldShowTimeGroup(nextMessage, message))) && (
+                              <div className={`flex items-center justify-end mt-1 space-x-1 ${
+                                isOwn ? 'text-blue-200' : 'text-primary-400'
+                              }`}>
+                                <span className="text-xs">
+                                  {formatMessageTime(message.timestamp)}
+                                </span>
+                                {isOwn && (
+                                  <div className="flex items-center">
+                                    {isPending ? (
+                                      pendingStatus === 'sending' ? (
+                                        <Clock className="w-3 h-3 animate-spin" />
+                                      ) : pendingStatus === 'failed' ? (
+                                        <span className="text-xs text-red-200">Failed</span>
+                                      ) : (
+                                        <Check className="w-3 h-3" />
+                                      )
+                                    ) : message.read ? (
+                                      <CheckCheck className="w-3 h-3" />
+                                    ) : (
+                                      <Check className="w-3 h-3" />
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </motion.div>
+                    </React.Fragment>
+                  );
+                })}
+                
+                {/* Typing Indicator */}
+                {typingUsersInConversation.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex items-end space-x-2"
+                  >
+                    <div className="w-8 h-8 bg-primary-800/50 rounded-full flex items-center justify-center">
+                      <User className="w-4 h-4 text-primary-300" />
+                    </div>
+                    <div className="bg-primary-700/50 px-4 py-2 rounded-2xl">
+                      <div className="flex space-x-1">
+                        <div className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <div className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <div className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+            </>
+          )}
+          
+          {/* Bottom ref for auto-scroll */}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Message Input */}
+        <div className="flex-shrink-0 p-4 border-t border-primary-700/30 bg-primary-900/95 backdrop-blur-sm z-30">
           <div className="flex items-center space-x-3 max-w-4xl mx-auto">
             <div className="flex-1">
               <textarea
@@ -976,176 +1259,6 @@ export function MessagesView() {
             >
               <Send className="w-5 h-5" />
             </button>
-          </div>
-        </div>
-
-        {/* Messages Container - Between header and input */}
-        <div className="absolute top-20 bottom-20 left-0 right-0 overflow-hidden">
-          <div 
-            ref={messagesContainerRef}
-            onScroll={handleScroll}
-            className="h-full overflow-y-auto px-4 py-4 messages-scrollbar flex flex-col"
-          >
-            {/* Loading indicator for pagination */}
-            {selectedConversation && messagePagination[selectedConversation]?.loading && messagePagination[selectedConversation]?.hasPrev && (
-              <div className="flex justify-center py-2">
-                <div className="w-6 h-6 border-2 border-primary-600 border-t-blue-500 rounded-full animate-spin"></div>
-              </div>
-            )}
-            
-            {/* Top ref for infinite scroll */}
-            <div ref={messagesTopRef} />
-            
-            {currentConversationMessages.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center">
-                <div className="text-center">
-                  <p className="text-primary-300">No messages yet</p>
-                  <p className="text-sm text-primary-400 mt-1">Send a message to start the conversation</p>
-                </div>
-              </div>
-            ) : (
-              <>
-                {/* Spacer to push messages to bottom when there are few messages */}
-                <div className="flex-1 min-h-0"></div>
-                
-                {/* Messages */}
-                <div className="space-y-1">
-                  {currentConversationMessages.map((message, index) => {
-                    // Ensure we're comparing the correct sender ID (handle both string and object)
-                    const messageSenderId = typeof message.senderId === 'object' ? (message.senderId as any).id : message.senderId;
-                    const isOwn = messageSenderId === state.currentUser?.id;
-                    const isPending = (message as any).isPending;
-                    const pendingStatus = isPending ? (message as any).status : null;
-                    
-                    const previousMessage = index > 0 ? currentConversationMessages[index - 1] : null;
-                    const nextMessage = index < currentConversationMessages.length - 1 ? currentConversationMessages[index + 1] : null;
-                    
-                    const showDateSeparator = shouldShowDateSeparator(message, previousMessage);
-                    const showTimeGroup = shouldShowTimeGroup(message, previousMessage);
-                    const showAvatar = shouldShowAvatar(message, nextMessage, isOwn);
-                    
-                    return (
-                      <React.Fragment key={message.id}>
-                        {/* Date Separator */}
-                        {showDateSeparator && (
-                          <motion.div
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="flex justify-center my-6"
-                          >
-                            <div className="bg-primary-800/50 px-3 py-1 rounded-full">
-                              <span className="text-xs font-medium text-primary-300">
-                                {formatDateSeparator(message.timestamp)}
-                              </span>
-                            </div>
-                          </motion.div>
-                        )}
-                        
-                        {/* Time Group Separator */}
-                        {showTimeGroup && !showDateSeparator && (
-                          <div className="h-4"></div>
-                        )}
-                        
-                        {/* Message */}
-                        <motion.div
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className={`flex ${isOwn ? 'justify-end' : 'justify-start'} ${
-                            showTimeGroup ? 'mt-2' : 'mt-0.5'
-                          }`}
-                        >
-                          <div className={`flex items-end space-x-2 max-w-xs lg:max-w-md ${isOwn ? 'flex-row-reverse space-x-reverse' : ''}`}>
-                            {/* Avatar */}
-                            <div className="w-8 h-8 flex-shrink-0">
-                              {showAvatar && !isOwn && (
-                                <div className="w-8 h-8 bg-primary-800/50 rounded-full flex items-center justify-center">
-                                  {selectedConversationUser.avatar ? (
-                                    <img
-                                      src={selectedConversationUser.avatar}
-                                      alt={selectedConversationUser.username}
-                                      className="w-full h-full object-cover rounded-full"
-                                    />
-                                  ) : (
-                                    <User className="w-4 h-4 text-primary-300" />
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                            
-                            {/* Message Bubble */}
-                            <div
-                              className={`px-4 py-2 rounded-2xl ${
-                                isOwn
-                                  ? `bg-blue-600 text-white ${isPending && pendingStatus === 'sending' ? 'opacity-70' : ''} ${isPending && pendingStatus === 'failed' ? 'bg-red-600' : ''}`
-                                  : 'bg-primary-700/50 text-primary-100'
-                              } ${
-                                // Adjust border radius for grouped messages
-                                !showTimeGroup && !isOwn && !showAvatar ? 'rounded-tl-md' : ''
-                              } ${
-                                !showTimeGroup && isOwn ? 'rounded-tr-md' : ''
-                              }`}
-                            >
-                              <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                              
-                              {/* Message metadata - only show on last message in time group */}
-                              {(showAvatar || index === currentConversationMessages.length - 1 || 
-                                (nextMessage && shouldShowTimeGroup(nextMessage, message))) && (
-                                <div className={`flex items-center justify-end mt-1 space-x-1 ${
-                                  isOwn ? 'text-blue-200' : 'text-primary-400'
-                                }`}>
-                                  <span className="text-xs">
-                                    {formatMessageTime(message.timestamp)}
-                                  </span>
-                                  {isOwn && (
-                                    <div className="flex items-center">
-                                      {isPending ? (
-                                        pendingStatus === 'sending' ? (
-                                          <Clock className="w-3 h-3 animate-spin" />
-                                        ) : pendingStatus === 'failed' ? (
-                                          <span className="text-xs text-red-200">Failed</span>
-                                        ) : (
-                                          <Check className="w-3 h-3" />
-                                        )
-                                      ) : message.read ? (
-                                        <CheckCheck className="w-3 h-3" />
-                                      ) : (
-                                        <Check className="w-3 h-3" />
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </motion.div>
-                      </React.Fragment>
-                    );
-                  })}
-                  
-                  {/* Typing Indicator */}
-                  {typingUsersInConversation.length > 0 && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="flex items-end space-x-2"
-                    >
-                      <div className="w-8 h-8 bg-primary-800/50 rounded-full flex items-center justify-center">
-                        <User className="w-4 h-4 text-primary-300" />
-                      </div>
-                      <div className="bg-primary-700/50 px-4 py-2 rounded-2xl">
-                        <div className="flex space-x-1">
-                          <div className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                          <div className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                          <div className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                        </div>
-                      </div>
-                    </motion.div>
-                  )}
-                  
-                  <div ref={messagesEndRef} />
-                </div>
-              </>
-            )}
           </div>
         </div>
       </div>
@@ -1271,26 +1384,6 @@ export function MessagesView() {
     }
   };
 
-  // Auto-scroll to bottom when new messages arrive (but preserve scroll position when loading more)
-  const scrollToBottom = (force: boolean = false) => {
-    if (messagesEndRef.current) {
-      const container = messagesContainerRef.current;
-      if (!container) return;
-
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      const isNearBottom = scrollHeight - scrollTop - clientHeight < 100;
-      
-      // Only auto-scroll if user is near bottom or it's forced
-      if (force || isNearBottom) {
-        messagesEndRef.current.scrollIntoView({ 
-          behavior: 'smooth',
-          block: 'end',
-          inline: 'nearest'
-        });
-      }
-    }
-  };
-
   // Preserve scroll position when loading more messages
   const preserveScrollPosition = () => {
     if (messagesContainerRef.current) {
@@ -1341,16 +1434,56 @@ export function MessagesView() {
     return user;
   }, [state.users, state.currentUser?.id]);
 
+  // Track message count for debugging (notification logic moved to AppContext)
+  useEffect(() => {
+    if (!state.messages || state.messages.length === 0) {
+      setPreviousMessageCount(0);
+      return;
+    }
+
+    // If this is the first load, just set the count
+    if (previousMessageCount === 0) {
+      setPreviousMessageCount(state.messages.length);
+      return;
+    }
+
+    // Update message count
+    if (state.messages.length !== previousMessageCount) {
+      setPreviousMessageCount(state.messages.length);
+    }
+  }, [state.messages, previousMessageCount]);
+
+  // Show seller profile if selected
+  if (selectedSeller) {
+    return (
+      <SellerProfileView
+        key={`seller-${selectedSeller.id}`}
+        sellerId={selectedSeller.id}
+        onBack={() => setSelectedSeller(null)}
+        onListingClick={() => {
+          // This would be used if we want to navigate to listings from profile
+          // For now, just go back to messages
+          setSelectedSeller(null);
+        }}
+        source="messages"
+      />
+    );
+  }
+
   return (
     <div className="h-full flex">
       {/* Mobile: Show either conversations list or chat */}
-      <div className="lg:hidden w-full h-full">
-        {selectedConversation ? renderChatInterface() : renderConversationsList()}
+      <div className={`lg:hidden w-full h-full ${selectedConversation ? 'hidden' : 'block'}`}>
+        {renderConversationsList()}
       </div>
       
-      {/* Desktop: Show both side by side */}
-      <div className="hidden lg:flex w-full h-full">
+      {/* Desktop: Show conversations list */}
+      <div className="hidden lg:block">
         {renderConversationsList()}
+      </div>
+
+      {/* Unified chat interface container for both mobile and desktop */}
+      <div className={`flex-1 h-full ${selectedConversation ? 'block' : 'hidden lg:block'}`}>
         {renderChatInterface()}
       </div>
     </div>

@@ -128,7 +128,7 @@ export function ListingForm({ vehicle, listing, onClose }: ListingFormProps) {
         updateListing({ ...listing, ...listingData, updatedAt: now });
       } else {
         // Creating new listing - set initial renewal timing
-        const canRenewAfter = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(); // 24 hours from now
+        const canRenewAfter = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString(); // 12 hours from now
         const listingData = {
           ...formData,
           vehicleId: vehicle.id,
