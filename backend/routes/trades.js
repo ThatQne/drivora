@@ -229,7 +229,7 @@ router.post('/', auth, async (req, res) => {
     }
 
     // Check if listing exists and is active
-    const listing = await Listing.findById(listingId);
+    const listing = await Listing.findById(listingId).populate('vehicleId').populate('sellerId');
     if (!listing || !listing.isActive) {
       return res.status(404).json({ message: 'Listing not found or inactive' });
     }
@@ -289,9 +289,17 @@ router.post('/', auth, async (req, res) => {
       message
     };
 
-    // Create the trade
+    // Create the trade with listing data stored
     const trade = new Trade({
       listingId,
+      listingData: {
+        title: listing.title,
+        description: listing.description,
+        price: listing.price,
+        vehicleId: listing.vehicleId._id,
+        sellerId: listing.sellerId._id,
+        createdAt: listing.createdAt
+      },
       offererUserId: req.user.id,
       receiverUserId,
       status: 'pending',
@@ -709,10 +717,30 @@ router.put('/:id', auth, async (req, res) => {
       trade.completedAt = new Date();
     }
 
-    // For rejected and cancelled trades, vehicles should remain in their current state (no action needed)
+    // For rejected and cancelled trades, also clear trade flags
     if (['rejected', 'cancelled'].includes(status)) {
-      console.log(`✅ Trade ${trade._id} ${status} - vehicles remain in their current state for future trades`);
+      console.log(`🔄 Trade ${trade._id} ${status} - clearing trade flags from vehicles`);
+      
+      // Get all vehicle IDs involved in the trade
+      const allVehicleIds = [
+        ...trade.offererVehicleIds,
+        ...(trade.receiverVehicleIds || [])
+      ];
+
+      if (allVehicleIds.length > 0) {
+        // Clear trade flags from vehicles - they can now be relisted
+        await Vehicle.updateMany(
+          { _id: { $in: allVehicleIds } },
+          { 
+            isInTrade: false,
+            tradeId: null
+          }
+        );
+        console.log(`🔄 Cleared trade flags from ${allVehicleIds.length} vehicles - they can now be relisted`);
+      }
     }
+
+
 
     console.log(`💾 Saving trade to database...`);
     await trade.save();

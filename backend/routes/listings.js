@@ -265,9 +265,13 @@ router.post('/', auth, async (req, res) => {
       }
     }
 
-    // Check if vehicle is already listed or in auction
-    if (vehicle.isListed || vehicle.isAuctioned) {
-      return res.status(400).json({ error: 'Vehicle is already listed or in auction' });
+    // Check if vehicle is already listed, in auction, or in trade
+    if (vehicle.isListed || vehicle.isAuctioned || vehicle.isInTrade) {
+      let message = 'Vehicle is already ';
+      if (vehicle.isListed) message += 'listed';
+      else if (vehicle.isAuctioned) message += 'in auction';
+      else if (vehicle.isInTrade) message += 'in an active trade';
+      return res.status(400).json({ error: message });
     }
 
     // Create listing

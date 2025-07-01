@@ -12,8 +12,8 @@ router.post('/', auth, async (req, res) => {
     const { revieweeId, tradeId, rating, comment } = req.body;
 
     // Validate required fields
-    if (!revieweeId || !tradeId || !rating || !comment) {
-      return res.status(400).json({ message: 'All fields are required' });
+    if (!revieweeId || !tradeId || !rating) {
+      return res.status(400).json({ message: 'Reviewee ID, trade ID, and rating are required' });
     }
 
     // Check if reviewee exists
@@ -56,10 +56,17 @@ router.post('/', auth, async (req, res) => {
       revieweeId,
       tradeId,
       rating,
-      comment
+      comment: comment || undefined
     });
 
-    await review.save();
+    try {
+      await review.save();
+    } catch (error) {
+      if (error.code === 11000) {
+        return res.status(400).json({ message: 'You have already reviewed this trade' });
+      }
+      throw error;
+    }
 
     // Update user's rating and review count
     const reviews = await Review.find({ revieweeId });

@@ -43,6 +43,23 @@ const tradeSchema = new mongoose.Schema({
     ref: 'Listing',
     required: true
   },
+  
+  // Store listing data before it gets deleted
+  listingData: {
+    title: String,
+    description: String,
+    price: Number,
+    vehicleId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Vehicle'
+    },
+    sellerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    createdAt: Date
+  },
+  
   offererUserId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

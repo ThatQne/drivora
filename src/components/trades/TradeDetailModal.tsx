@@ -35,7 +35,11 @@ export function TradeDetailModal({ trade, isOutbound, onClose, onCounterOffer }:
   const [showReviewModal, setShowReviewModal] = useState(false);
 
   const listing = state.allListings.find(l => l.id === trade.listingId);
-  const targetVehicle = listing ? (listing as any).vehicle || state.vehicles.find(v => v.id === listing.vehicleId) : null;
+  const targetVehicle = listing 
+    ? (listing as any).vehicle || state.vehicles.find(v => v.id === listing.vehicleId)
+    : trade.listingData 
+      ? state.vehicles.find(v => v.id === trade.listingData!.vehicleId)
+      : null;
   
   // Extract user IDs properly (handle both string IDs and populated objects)
   const otherUserId = isOutbound 
@@ -300,7 +304,7 @@ export function TradeDetailModal({ trade, isOutbound, onClose, onCounterOffer }:
           {/* Left Column - Trade Details */}
           <div className="space-y-6">
             {/* Target Listing */}
-            {listing && (
+            {(listing || trade.listingData) && (
               <div>
                 <h3 className="text-lg font-semibold text-primary-100 mb-4">Target Listing</h3>
                 <div className="glass-effect rounded-xl p-4">
@@ -309,7 +313,7 @@ export function TradeDetailModal({ trade, isOutbound, onClose, onCounterOffer }:
                       {targetVehicle?.images?.[0] ? (
                         <img
                           src={targetVehicle.images[0]}
-                          alt={listing.title}
+                          alt={listing?.title || trade.listingData?.title || 'Vehicle'}
                           className="w-full h-full object-cover rounded-lg"
                         />
                       ) : (
@@ -317,13 +321,20 @@ export function TradeDetailModal({ trade, isOutbound, onClose, onCounterOffer }:
                       )}
                     </div>
                     <div className="flex-1">
-                      <h4 className="font-semibold text-primary-100">{listing.title}</h4>
+                      <h4 className="font-semibold text-primary-100">
+                        {listing?.title || trade.listingData?.title}
+                      </h4>
                       <p className="text-sm text-primary-300">
                         {targetVehicle && `${targetVehicle.year} ${targetVehicle.make} ${targetVehicle.model}`}
                       </p>
                       <p className="text-green-400 font-bold">
-                        ${listing.price.toLocaleString()}
+                        ${(listing?.price || trade.listingData?.price || 0).toLocaleString()}
                       </p>
+                      {trade.listingData && !listing && (
+                        <p className="text-primary-500 text-xs mt-1">
+                          (Listing completed)
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>

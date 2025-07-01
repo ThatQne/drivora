@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Star, Send } from 'lucide-react';
+import { X, Circle, Send } from 'lucide-react';
 import { useApp } from '../../context/AppContext.tsx';
 import { User, Trade } from '../../types/index.ts';
 
@@ -27,7 +27,7 @@ export function ReviewModal({ trade, revieweeUser, onClose }: ReviewModalProps) 
         revieweeId: revieweeUser.id,
         tradeId: trade.id,
         rating,
-        comment
+        comment: comment.trim() || undefined
       });
       onClose();
     } catch (error) {
@@ -89,16 +89,16 @@ export function ReviewModal({ trade, revieweeUser, onClose }: ReviewModalProps) 
               Rating
             </label>
             <div className="flex space-x-1">
-              {[1, 2, 3, 4, 5].map((star) => (
+              {[1, 2, 3, 4, 5].map((value) => (
                 <button
-                  key={star}
+                  key={value}
                   type="button"
-                  onClick={() => setRating(star)}
+                  onClick={() => setRating(value)}
                   className={`p-1 transition-colors ${
-                    star <= rating ? 'text-yellow-400' : 'text-primary-600'
+                    value <= rating ? 'text-blue-400' : 'text-primary-600'
                   }`}
                 >
-                  <Star className="w-6 h-6 fill-current" />
+                  <Circle className={`w-6 h-6 ${value <= rating ? 'fill-current' : ''}`} />
                 </button>
               ))}
             </div>
@@ -106,14 +106,13 @@ export function ReviewModal({ trade, revieweeUser, onClose }: ReviewModalProps) 
 
           <div>
             <label className="block text-sm font-medium text-primary-200 mb-2">
-              Comment
+              Comment <span className="text-primary-400 text-xs">(optional)</span>
             </label>
             <textarea
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               placeholder="Share your experience with this trade..."
               className="input-field min-h-[100px] resize-none"
-              required
             />
           </div>
 
@@ -127,7 +126,7 @@ export function ReviewModal({ trade, revieweeUser, onClose }: ReviewModalProps) 
             </button>
             <button
               type="submit"
-              disabled={loading || !comment.trim()}
+              disabled={loading}
               className="flex-1 btn-primary flex items-center justify-center space-x-2"
             >
               <Send className="w-4 h-4" />

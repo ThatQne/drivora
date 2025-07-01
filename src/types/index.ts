@@ -104,6 +104,17 @@ export interface Bid {
 export interface Trade {
   id: string;
   listingId: string;
+  
+  // Store listing data before it gets deleted
+  listingData?: {
+    title: string;
+    description: string;
+    price: number;
+    vehicleId: string;
+    sellerId: string;
+    createdAt: string;
+  };
+  
   offererUserId: string; // Person making the trade offer
   receiverUserId: string; // Person receiving the trade offer (listing owner)
   status: 'pending' | 'accepted' | 'rejected' | 'completed' | 'cancelled' | 'countered' | 'pending_acceptance' | 'declined';
