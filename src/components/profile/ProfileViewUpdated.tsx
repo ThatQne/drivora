@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Edit, Save, X, Camera, User } from 'lucide-react';
 import { useApp } from '../../context/AppContext.tsx';
 import ApiService from '../../services/apiService.ts';
+import { compressImage } from '../../utils/imageUtils.ts';
 
 export function ProfileViewUpdated() {
   const { state, updateUser } = useApp();
@@ -28,38 +29,23 @@ export function ProfileViewUpdated() {
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) {
-      console.log('No file selected');
-      return;
-    }
-
-    console.log('Selected file:', {
-      name: file.name,
-      size: file.size,
-      type: file.type,
-    });
+    if (!file) return;
 
     // Check file type
     if (!file.type.startsWith('image/')) {
-      alert('Please select a valid image file (jpg, png, gif, etc.)');
-      return;
-    }
-
-    // Check if file is corrupted or empty
-    if (file.size === 0) {
-      alert('Selected file appears to be empty or corrupted');
-      return;
-    }
-
-    // Check maximum file size (10MB limit for upload)
-    if (file.size > 10 * 1024 * 1024) {
-      alert('Image file is too large. Please select an image smaller than 10MB.');
+      showError('Invalid File', 'Please select a valid image file.');
       return;
     }
 
     setUploadingImage(true);
     
     try {
+      // Compress the image before uploading
+      const compressedFile = await compressImage(file, {
+        maxSizeMB: 0.5, // 500KB
+        maxWidthOrHeight: 400, // For profile pictures
+      });
+
       // Convert to base64 for upload
       const imageBase64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -94,50 +80,24 @@ export function ProfileViewUpdated() {
           }
         }, 30000); // 30 second timeout
         
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(compressedFile);
       });
 
-      console.log('File read successfully, uploading to Cloudinary...');
-      
-      // Upload to Cloudinary via API
       const uploadResponse = await ApiService.uploadImage(imageBase64, 'profile-pictures');
       
-      console.log('Image uploaded successfully:', uploadResponse.url);
-      
-      // Update profile data state
-      setProfileData(prev => ({
-        ...prev,
-        avatar: uploadResponse.url
-      }));
+      setProfileData(prev => ({ ...prev, avatar: uploadResponse.url }));
 
-      // Immediately save the profile picture to user data
       if (state.currentUser) {
-        const updatedUser = {
-          ...state.currentUser,
-          avatar: uploadResponse.url,
-        };
-        
-        console.log('Saving profile picture to user data');
-        try {
-          const savedUser = await ApiService.updateUserProfile({ avatar: uploadResponse.url });
-          updateUser(savedUser);
-          console.log('Profile picture saved successfully');
-          alert('Profile picture updated successfully!');
-        } catch (updateError) {
-          console.error('Failed to update user:', updateError);
-          alert('Failed to save profile picture: ' + (updateError instanceof Error ? updateError.message : 'Unknown save error'));
-        }
-      } else {
-        console.error('Cannot save profile picture - user not available');
-        alert('Cannot save profile picture - please try logging out and back in');
+        const savedUser = await ApiService.updateUserProfile({ avatar: uploadResponse.url });
+        updateUser(savedUser); // This now only updates context state
+        showSuccess('Avatar Updated!', 'Your new profile picture has been saved.');
       }
     } catch (error) {
-      console.error('Unexpected error during image processing:', error);
-      alert('Unexpected error occurred: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      console.error('Failed to upload avatar:', error);
+      showError('Upload Failed', error instanceof Error ? error.message : 'Could not upload image.');
     } finally {
       setUploadingImage(false);
-      // Clear the input to allow re-selecting the same file
-      e.target.value = '';
+      e.target.value = ''; // Clear input
     }
   };
 
@@ -161,12 +121,12 @@ export function ProfileViewUpdated() {
       
       // Update user data via API
       const updatedUser = await ApiService.updateUserProfile(profileData);
-      updateUser(updatedUser);
-      alert('Profile updated successfully!');
+      updateUser(updatedUser); // This now only updates context state
+      showSuccess('Profile Updated', 'Your information has been saved successfully.');
       setIsEditing(false);
     } catch (error) {
       console.error('Failed to update profile:', error);
-      alert('Failed to update profile: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      showError('Update Failed', error instanceof Error ? error.message : 'Could not save profile.');
     } finally {
       setLoading(false);
     }

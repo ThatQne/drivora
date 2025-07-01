@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Car, ArrowLeftRight, MessageCircle, User, LogOut, Menu, X, List, Gavel } from 'lucide-react';
+import { Car, ArrowLeftRight, MessageCircle, User, LogOut, Menu, X, List, Gavel, Users } from 'lucide-react';
 import { useApp } from '../../context/AppContext.tsx';
 import { NavigationTab } from '../../types/index.ts';
 
@@ -86,6 +86,11 @@ export function Navigation({ isMobile, isOpen, onToggle, onHoverChange }: Naviga
       badge: state.messages.filter(msg => 
         msg.receiverId === state.currentUser?.id && !msg.read
       ).length || undefined,
+    },
+    {
+      tab: 'users',
+      icon: <Users className="w-5 h-5" />,
+      label: 'Users',
     },
   ];
 

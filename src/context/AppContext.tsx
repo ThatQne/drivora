@@ -5,6 +5,27 @@ import { DataService } from '../services/dataService.ts';
 import ApiService from '../services/apiService.ts';
 import webSocketService from '../services/webSocketService.ts';
 
+// Helper to ensure listing data structure is consistent
+const normalizeListing = (listing: any): Listing => {
+  const normalized = {
+    ...listing,
+    id: listing._id || listing.id,
+    vehicle: typeof listing.vehicleId === 'object' && listing.vehicleId !== null 
+      ? { ...(listing.vehicleId as any), id: (listing.vehicleId as any)._id || (listing.vehicleId as any).id } 
+      : listing.vehicle,
+    seller: typeof listing.sellerId === 'object' && listing.sellerId !== null 
+      ? { ...(listing.sellerId as any), id: (listing.sellerId as any)._id || (listing.sellerId as any).id } 
+      : listing.seller,
+    vehicleId: typeof listing.vehicleId === 'object' && listing.vehicleId !== null 
+      ? (listing.vehicleId as any)._id || (listing.vehicleId as any).id 
+      : listing.vehicleId,
+    sellerId: typeof listing.sellerId === 'object' && listing.sellerId !== null 
+      ? (listing.sellerId as any)._id || (listing.sellerId as any).id 
+      : listing.sellerId,
+  };
+  return normalized as Listing;
+};
+
 interface AppContextType {
   state: AppState;
   dispatch: React.Dispatch<AppAction>;
@@ -97,7 +118,8 @@ type AppAction =
   | { type: 'ADD_NOTIFICATION'; payload: Notification }
   | { type: 'REMOVE_NOTIFICATION'; payload: string }
   | { type: 'MARK_NOTIFICATION_READ'; payload: string }
-  | { type: 'CLEAR_ALL_NOTIFICATIONS' };
+  | { type: 'CLEAR_ALL_NOTIFICATIONS' }
+  | { type: 'UPDATE_USER_STATE'; payload: User };
 
 const initialState: AppState = {
   currentUser: null,
@@ -426,10 +448,29 @@ function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         notifications: []
       };
+    case 'UPDATE_USER_STATE':
+      return updateUserInStateAndStorage(state, action.payload);
     default:
       return state;
   }
 }
+
+// Helper function to update user in both state and local storage
+const updateUserInStateAndStorage = (state: AppState, user: User): AppState => {
+  const updatedUsers = state.users.map(u => u.id === user.id ? user : u);
+  
+  // Update currentUser if it's the one being changed
+  const updatedCurrentUser = state.currentUser?.id === user.id ? user : state.currentUser;
+
+  // IMPORTANT: No longer saving to localStorage to prevent quota errors.
+  // The state is the source of truth, refreshed from API on load.
+  
+  return {
+    ...state,
+    users: updatedUsers,
+    currentUser: updatedCurrentUser
+  };
+};
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
@@ -564,20 +605,32 @@ export function AppProvider({ children }: AppProviderProps) {
             }
           },
 
-          onListingUpdated: (listing) => {
-            console.log('📋 Real-time: Listing updated:', listing.title);
-            const listingWithId = { ...listing, id: listing._id || listing.id };
+          onListingUpdated: (listingData) => {
+            console.log('📋 Real-time: Listing updated:', listingData.title);
+            const listing = normalizeListing(listingData);
             
             // Update in all listings - use stateRef to get current state
             const updatedAllListings = stateRef.current.allListings.map(l => 
-              l.id === listingWithId.id ? listingWithId : l
+              l.id === listing.id ? listing : l
             );
             dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
 
             // Update in user's own listings if it's theirs - handle both string ID and populated object
-            const sellerId = typeof listing.sellerId === 'object' ? listing.sellerId._id || listing.sellerId.id : listing.sellerId;
-            if (sellerId === stateRef.current.currentUser?.id) {
-              dispatch({ type: 'UPDATE_LISTING', payload: listingWithId });
+            if (listing.sellerId === stateRef.current.currentUser?.id) {
+              dispatch({ type: 'UPDATE_LISTING', payload: listing });
+              
+              // 🚗 ENSURE VEHICLE LISTING STATUS: Make sure vehicle remains marked as listed
+              const vehicle = stateRef.current.vehicles.find(v => v.id === listing.vehicleId);
+              if (vehicle) {
+                const updatedVehicle: Vehicle = {
+                  ...vehicle,
+                  isListed: true, // Keep it listed since we're just updating
+                  listingId: listing.id,
+                  updatedAt: new Date().toISOString(),
+                };
+                dispatch({ type: 'UPDATE_VEHICLE', payload: updatedVehicle });
+                console.log('🚗 Vehicle listing status maintained via WebSocket');
+              }
             }
           },
 
@@ -1288,13 +1341,7 @@ export function AppProvider({ children }: AppProviderProps) {
   }, []);
 
   const updateUser = (user: User) => {
-    try {
-      AuthService.updateUser(user);
-      dispatch({ type: 'SET_USER', payload: user });
-    } catch (error) {
-      console.error('Error in context updateUser:', error);
-      throw error;
-    }
+    dispatch({ type: 'UPDATE_USER_STATE', payload: user });
   };
 
   const addVehicle = async (vehicleData: {
@@ -1393,17 +1440,20 @@ export function AppProvider({ children }: AppProviderProps) {
       await loadAllListings(true);
       console.log('🔄 Marketplace listings refreshed');
       
+      showSuccess('Listing Created', 'Your vehicle is now on the marketplace.');
       console.log('✅ Listing created with local updates and marketplace refresh');
       
     } catch (error) {
       console.error('Error adding listing:', error);
+      showError('Listing Failed', 'There was a problem creating your listing.');
       throw error; // Re-throw so UI can show the error
     }
   };
 
-  const updateListing = async (updatedListing: Listing) => {
+  const updateListing = async (updatedListingData: Listing) => {
     try {
-      const listing = await ApiService.updateListing(updatedListing.id, updatedListing);
+      const apiResponse = await ApiService.updateListing(updatedListingData.id, updatedListingData);
+      const listing = normalizeListing(apiResponse);
       
       // 🚀 SMART UPDATE: Update listing in user listings
       dispatch({ type: 'UPDATE_LISTING', payload: listing });
@@ -1430,24 +1480,28 @@ export function AppProvider({ children }: AppProviderProps) {
         console.log('🚗 Vehicle listing status maintained in garage');
       }
       
+      showSuccess('Listing Updated', 'Your listing details have been saved.');
       console.log('✅ Listing updated with smart updates - no API refresh needed');
       
     } catch (error) {
       console.error('Error updating listing:', error);
+      showError('Update Failed', 'There was a problem saving your changes.');
     }
   };
 
   const deleteListing = async (listingId: string) => {
     try {
+      // Find the listing before it's removed from state to get vehicleId
+      const listingToDelete = state.listings.find(l => l.id === listingId) || state.allListings.find(l => l.id === listingId);
+
       await ApiService.deleteListing(listingId);
       
       // 🚀 SMART UPDATE: Remove listing from user listings
       dispatch({ type: 'DELETE_LISTING', payload: listingId });
 
       // 🚗 SMART UPDATE: Update vehicle to mark as not listed
-      const listing = state.listings.find(l => l.id === listingId);
-      if (listing) {
-        const vehicle = state.vehicles.find(v => v.id === listing.vehicleId);
+      if (listingToDelete) {
+        const vehicle = state.vehicles.find(v => v.id === listingToDelete.vehicleId);
         if (vehicle) {
           const updatedVehicle: Vehicle = {
             ...vehicle,
@@ -1467,10 +1521,12 @@ export function AppProvider({ children }: AppProviderProps) {
         console.log('📋 Listing removed from marketplace');
       }
       
+      showSuccess('Listing Removed', 'Your listing has been taken off the marketplace.');
       console.log('✅ Listing deleted with smart updates - no API refresh needed');
 
     } catch (error) {
       console.error('Error deleting listing:', error);
+      showError('Deletion Failed', 'There was a problem removing your listing.');
     }
   };
 

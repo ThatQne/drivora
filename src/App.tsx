@@ -10,9 +10,10 @@ import { TradesView } from './components/trades/TradesView.tsx';
 import { MessagesView } from './components/messages/MessagesView.tsx';
 import { ProfileView } from './components/profile/ProfileView.tsx';
 import { NotificationContainer } from './components/common/NotificationContainer.tsx';
+import { UserSearchView } from './components/users/UserSearchView.tsx';
 
 function AppContent() {
-  const { state, activeTab } = useApp();
+  const { state, activeTab, setActiveTab, loadAllListings } = useApp();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isNavHovered, setIsNavHovered] = useState(false);
 
@@ -35,7 +36,7 @@ function AppContent() {
     return <SmartAuthForm />;
   }
 
-  const renderActiveView = () => {
+  const renderContent = () => {
     switch (activeTab) {
       case 'garage':
         return <GarageView />;
@@ -49,6 +50,8 @@ function AppContent() {
         return <MessagesView />;
       case 'profile':
         return <ProfileView />;
+      case 'users':
+        return <UserSearchView />;
       default:
         return <GarageView />;
     }
@@ -96,7 +99,7 @@ function AppContent() {
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.1 }}
               >
-                {renderActiveView()}
+                {renderContent()}
               </motion.div>
             </AnimatePresence>
           </div>

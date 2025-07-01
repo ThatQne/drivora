@@ -169,7 +169,7 @@ listingSchema.methods.renew = function() {
 };
 
 // Pre-save middleware to track changes
-listingSchema.pre('save', function(next) {
+listingSchema.pre('save', async function(next) {
   // Set original price on first save
   if (this.isNew && this.price && !this.originalPrice) {
     this.originalPrice = this.price;
@@ -183,68 +183,66 @@ listingSchema.pre('save', function(next) {
   
   // Track changes on updates
   if (!this.isNew) {
-    const modifiedPaths = this.modifiedPaths();
+    // Get the original document from database to compare changes
+    const original = await this.constructor.findById(this._id);
+    if (!original) return next();
     
-    if (this.isModified('price')) {
-      const oldPrice = this.get('price', null, { getters: false });
+    if (this.isModified('price') && original.price !== this.price) {
       this.history.push({
         type: 'price_change',
-        oldValue: oldPrice,
+        oldValue: original.price,
         newValue: this.price,
         changedAt: new Date()
       });
     }
     
-    if (this.isModified('title')) {
-      const oldTitle = this.get('title', null, { getters: false });
+    if (this.isModified('title') && original.title !== this.title) {
       this.history.push({
         type: 'title_update',
-        oldValue: oldTitle,
+        oldValue: original.title,
         newValue: this.title,
         changedAt: new Date()
       });
     }
     
-    if (this.isModified('description')) {
-      const oldDescription = this.get('description', null, { getters: false });
+    if (this.isModified('description') && original.description !== this.description) {
       this.history.push({
         type: 'description_update',
-        oldValue: oldDescription,
+        oldValue: original.description,
         newValue: this.description,
         changedAt: new Date()
       });
     }
     
-    if (this.isModified('problems')) {
-      const oldProblems = this.get('problems', null, { getters: false });
+    if (this.isModified('problems') && JSON.stringify(original.problems) !== JSON.stringify(this.problems)) {
       this.history.push({
         type: 'problems_update',
-        oldValue: oldProblems,
+        oldValue: original.problems,
         newValue: this.problems,
         changedAt: new Date()
       });
     }
     
-    if (this.isModified('additionalFeatures')) {
-      const oldFeatures = this.get('additionalFeatures', null, { getters: false });
+    if (this.isModified('additionalFeatures') && JSON.stringify(original.additionalFeatures) !== JSON.stringify(this.additionalFeatures)) {
       this.history.push({
         type: 'features_update',
-        oldValue: oldFeatures,
+        oldValue: original.additionalFeatures,
         newValue: this.additionalFeatures,
         changedAt: new Date()
       });
     }
     
-    if (this.isModified('tags')) {
-      const oldTags = this.get('tags', null, { getters: false });
+    if (this.isModified('tags') && JSON.stringify(original.tags) !== JSON.stringify(this.tags)) {
       this.history.push({
         type: 'tags_update',
-        oldValue: oldTags,
+        oldValue: original.tags,
         newValue: this.tags,
         changedAt: new Date()
       });
     }
     
+    // Update lastEditedAt if any field was modified
+    const modifiedPaths = this.modifiedPaths();
     if (modifiedPaths.length > 0) {
       this.lastEditedAt = new Date();
     }

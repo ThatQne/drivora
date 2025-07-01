@@ -104,6 +104,16 @@ export function ListingDetailView({ listing, vehicle, seller, onClose, onContact
             <p className="text-primary-300">
               {vehicle.year} {vehicle.make} {vehicle.model}
             </p>
+            <div className="flex items-center space-x-4 text-sm text-primary-400 mt-2">
+              <div className="flex items-center space-x-1">
+                <Eye className="w-4 h-4" />
+                <span>{listing.views} views</span>
+              </div>
+              <span>•</span>
+              <div>
+                <span>ID: {listing.id.slice(-8)}</span>
+              </div>
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -190,6 +200,34 @@ export function ListingDetailView({ listing, vehicle, seller, onClose, onContact
               </div>
             )}
 
+            {/* Action Buttons */}
+            <div className="flex space-x-3">
+              {isOwnListing ? (
+                <div className="flex-1 glass-effect rounded-lg px-4 py-3 text-center">
+                  <p className="text-primary-400 text-sm">This is your own listing</p>
+                </div>
+              ) : (
+                <>
+                  <MessageButton
+                    targetUser={seller}
+                    listingId={listing.id}
+                    initialMessage={`Hi! I'm interested in your ${vehicle.year} ${vehicle.make} ${vehicle.model} listing.`}
+                    variant="primary"
+                    className="flex-1"
+                  />
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => onTrade(listing)}
+                    className="flex-1 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20 rounded-lg px-4 py-3 flex items-center justify-center space-x-2 transition-colors"
+                  >
+                    <ArrowLeftRight className="w-5 h-5" />
+                    <span>Make Trade Offer</span>
+                  </motion.button>
+                </>
+              )}
+            </div>
+
             {/* Vehicle Details */}
             <div className="glass-effect rounded-xl p-4">
               <h3 className="text-lg font-semibold text-primary-100 mb-4">Vehicle Details</h3>
@@ -239,6 +277,58 @@ export function ListingDetailView({ listing, vehicle, seller, onClose, onContact
                   </motion.button>
                 </div>
               </div>
+            </div>
+
+            {/* Seller Information */}
+            <div className="glass-effect rounded-xl p-4 hover:shadow-xl transition-all duration-300">
+              <h3 className="text-lg font-semibold text-primary-100 mb-3">Seller Information</h3>
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => onSellerClick && onSellerClick(seller)}
+                className="w-full text-left hover:bg-primary-800/30 rounded-lg p-2 -m-2 transition-colors group"
+              >
+                <div className="flex items-center space-x-3 mb-4">
+                  <div className="w-12 h-12 bg-primary-800/50 rounded-full flex items-center justify-center overflow-hidden">
+                    {seller.avatar ? (
+                      <img
+                        src={seller.avatar}
+                        alt={seller.username}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <User className="w-6 h-6 text-primary-300" />
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-medium text-primary-200 group-hover:text-blue-300 transition-colors">@{seller.username}</p>
+                    <div className="text-sm text-primary-400">
+                      <p>Listed {formatTimeAgo(listing.createdAt)}</p>
+                      {listing.lastEditedAt && (
+                        <p className="text-yellow-400">
+                          Last edited {formatTimeAgo(listing.lastEditedAt)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Contact Info */}
+                <div className="space-y-2">
+                  {seller.phone && (
+                    <div className="flex items-center space-x-2 text-sm text-primary-300">
+                      <Phone className="w-4 h-4" />
+                      <span>{seller.phone}</span>
+                    </div>
+                  )}
+                  {seller.location && (
+                    <div className="flex items-center space-x-2 text-sm text-primary-300">
+                      <MapPin className="w-4 h-4" />
+                      <span>{seller.location}</span>
+                    </div>
+                  )}
+                </div>
+              </motion.button>
             </div>
           </div>
 
@@ -389,99 +479,6 @@ export function ListingDetailView({ listing, vehicle, seller, onClose, onContact
                 </div>
               </div>
             )}
-
-            {/* Seller Information */}
-            <div className="glass-effect rounded-xl p-4 hover:shadow-xl transition-all duration-300">
-              <h3 className="text-lg font-semibold text-primary-100 mb-3">Seller Information</h3>
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => onSellerClick && onSellerClick(seller)}
-                className="w-full text-left hover:bg-primary-800/30 rounded-lg p-2 -m-2 transition-colors group"
-              >
-                <div className="flex items-center space-x-3 mb-4">
-                  <div className="w-12 h-12 bg-primary-800/50 rounded-full flex items-center justify-center overflow-hidden">
-                    {seller.avatar ? (
-                      <img
-                        src={seller.avatar}
-                        alt={seller.username}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <User className="w-6 h-6 text-primary-300" />
-                    )}
-                  </div>
-                  <div>
-                    <p className="font-medium text-primary-200 group-hover:text-blue-300 transition-colors">@{seller.username}</p>
-                    <div className="text-sm text-primary-400">
-                      <p>Listed {formatTimeAgo(listing.createdAt)}</p>
-                      {listing.lastEditedAt && (
-                        <p className="text-yellow-400">
-                          Last edited {formatTimeAgo(listing.lastEditedAt)}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Contact Info */}
-                <div className="space-y-2">
-                  {seller.phone && (
-                    <div className="flex items-center space-x-2 text-sm text-primary-300">
-                      <Phone className="w-4 h-4" />
-                      <span>{seller.phone}</span>
-                    </div>
-                  )}
-                  {seller.location && (
-                    <div className="flex items-center space-x-2 text-sm text-primary-300">
-                      <MapPin className="w-4 h-4" />
-                      <span>{seller.location}</span>
-                    </div>
-                  )}
-                </div>
-              </motion.button>
-            </div>
-
-            {/* Listing Stats */}
-            <div className="glass-effect rounded-xl p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Eye className="w-5 h-5 text-primary-400" />
-                  <span className="text-primary-300">{listing.views} views</span>
-                </div>
-                <div className="text-sm text-primary-400">
-                  ID: {listing.id.slice(-8)}
-                </div>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex space-x-3">
-              {isOwnListing ? (
-                <div className="flex-1 glass-effect rounded-lg px-4 py-3 text-center">
-                  <p className="text-primary-400 text-sm">This is your own listing</p>
-                </div>
-              ) : (
-                <>
-                  <MessageButton
-                    targetUser={seller}
-                    listingId={listing.id}
-                    initialMessage={`Hi! I'm interested in your ${vehicle.year} ${vehicle.make} ${vehicle.model} listing.`}
-                    variant="primary"
-                    className="flex-1"
-                  />
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => onTrade(listing)}
-                    className="flex-1 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20 rounded-lg px-4 py-3 flex items-center justify-center space-x-2 transition-colors"
-                  >
-                    <ArrowLeftRight className="w-5 h-5" />
-                    <span>Make Trade Offer</span>
-                  </motion.button>
-                </>
-              )}
-            </div>
           </div>
         </div>
       </motion.div>

@@ -228,4 +228,4 @@ export interface Notification {
   data?: any; // for storing additional data like message/trade info
 }
 
-export type NavigationTab = 'garage' | 'listings' | 'auctions' | 'trades' | 'messages' | 'profile'; 
+export type NavigationTab = 'garage' | 'listings' | 'auctions' | 'trades' | 'messages' | 'profile' | 'users'; 
