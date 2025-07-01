@@ -254,7 +254,18 @@ router.post('/', auth, async (req, res) => {
       return res.status(404).json({ error: 'Vehicle not found' });
     }
 
-    // Check if vehicle is already listed or auctioned
+    // 🩹 Self-healing check for orphaned listings
+    if (vehicle.isListed && vehicle.listingId) {
+      const existingListing = await Listing.findById(vehicle.listingId);
+      if (!existingListing) {
+        console.warn(`Orphaned listing found for vehicle ${vehicle._id}. Correcting state.`);
+        vehicle.isListed = false;
+        vehicle.listingId = null;
+        await vehicle.save();
+      }
+    }
+
+    // Check if vehicle is already listed or in auction
     if (vehicle.isListed || vehicle.isAuctioned) {
       return res.status(400).json({ error: 'Vehicle is already listed or in auction' });
     }
