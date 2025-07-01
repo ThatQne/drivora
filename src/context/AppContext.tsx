@@ -4,6 +4,7 @@ import { AuthService } from '../services/authService.ts';
 import { DataService } from '../services/dataService.ts';
 import ApiService from '../services/apiService.ts';
 import webSocketService from '../services/webSocketService.ts';
+import { compressImage } from '../utils/imageUtils';
 
 // Helper to ensure listing data structure is consistent
 const normalizeListing = (listing: any): Listing => {
@@ -24,6 +25,17 @@ const normalizeListing = (listing: any): Listing => {
       : listing.sellerId,
   };
   return normalized as Listing;
+};
+
+// Helper to normalize trade data
+const normalizeTrade = (trade: any): Trade => {
+  return {
+    ...trade,
+    id: trade._id || trade.id,
+    offererUserId: typeof trade.offererUserId === 'object' ? trade.offererUserId._id : trade.offererUserId,
+    receiverUserId: typeof trade.receiverUserId === 'object' ? trade.receiverUserId._id : trade.receiverUserId,
+    listingId: typeof trade.listingId === 'object' ? trade.listingId._id : trade.listingId,
+  };
 };
 
 interface AppContextType {
@@ -646,29 +658,50 @@ export function AppProvider({ children }: AppProviderProps) {
           },
 
           // 🔄 TRADE UPDATES
-          onTradeCreated: (trade) => {
+          onTradeCreated: (tradeData) => {
+            const trade = normalizeTrade(tradeData);
             console.log('🔄 Real-time: New trade created:', trade.id);
-            const tradeWithId = { ...trade, id: trade._id || trade.id };
             
-            // Add to trades if current user is involved
             if (trade.offererUserId === stateRef.current.currentUser?.id || trade.receiverUserId === stateRef.current.currentUser?.id) {
-              // Check if trade already exists to prevent duplicates
-              const tradeExists = stateRef.current.trades.some(t => t.id === tradeWithId.id);
-              if (!tradeExists) {
-                dispatch({ type: 'ADD_TRADE', payload: tradeWithId });
-              } else {
-                console.log('🔄 Trade already exists, skipping duplicate:', tradeWithId.id);
+              dispatch({ type: 'ADD_TRADE', payload: trade });
+
+              if (trade.receiverUserId === stateRef.current.currentUser?.id) {
+                const offerer = stateRef.current.users.find(u => u.id === trade.offererUserId);
+                if (offerer) {
+                  showTradeNotification(trade, offerer);
+                }
               }
             }
           },
 
-          onTradeUpdated: (trade) => {
+          onTradeUpdated: (tradeData) => {
+            const trade = normalizeTrade(tradeData);
             console.log('🔄 Real-time: Trade updated:', trade.id);
-            const tradeWithId = { ...trade, id: trade._id || trade.id };
             
-            // Update trade if current user is involved
             if (trade.offererUserId === stateRef.current.currentUser?.id || trade.receiverUserId === stateRef.current.currentUser?.id) {
-              dispatch({ type: 'UPDATE_TRADE', payload: tradeWithId });
+              dispatch({ type: 'UPDATE_TRADE', payload: trade });
+              
+              const otherUserId = trade.offererUserId === stateRef.current.currentUser?.id ? trade.receiverUserId : trade.offererUserId;
+              const otherUser = stateRef.current.users.find(u => u.id === otherUserId);
+
+              const previousTrade = stateRef.current.trades.find(t => t.id === trade.id);
+
+              if (previousTrade && previousTrade.status !== trade.status && otherUser) {
+                switch (trade.status) {
+                  case 'accepted':
+                    showSuccess('Trade Accepted!', `Your trade with @${otherUser.username} was accepted.`);
+                    break;
+                  case 'countered':
+                    if (trade.lastCounteredBy !== stateRef.current.currentUser?.id) {
+                       showInfo('Trade Countered', `@${otherUser.username} sent a counter offer.`);
+                    }
+                    break;
+                  case 'cancelled':
+                  case 'rejected':
+                    showError('Trade Declined', `Your trade with @${otherUser.username} was declined.`);
+                    break;
+                }
+              }
             }
           },
 

@@ -59,6 +59,11 @@ const tradeSchema = new mongoose.Schema({
     default: 'pending'
   },
   
+  lastCounteredBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  
   // Offerer's offer
   offererCashAmount: {
     type: Number,

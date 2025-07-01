@@ -107,6 +107,7 @@ export interface Trade {
   offererUserId: string; // Person making the trade offer
   receiverUserId: string; // Person receiving the trade offer (listing owner)
   status: 'pending' | 'accepted' | 'rejected' | 'completed' | 'cancelled' | 'countered' | 'pending_acceptance' | 'declined';
+  lastCounteredBy?: string;
   
   // Offerer's offer
   offererCashAmount: number; // Cash offered by offerer (can be negative if they want cash back)

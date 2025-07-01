@@ -109,25 +109,12 @@ export function TradeDetailModal({ trade, isOutbound, onClose, onCounterOffer }:
   const handleAcceptTrade = async () => {
     setLoading(true);
     try {
-      let updatedTrade;
-      
-      if (isOutbound) {
-        // Outbound trade acceptance means both parties have accepted
-        updatedTrade = {
-          ...trade,
-          offererAccepted: true,
-          status: trade.receiverAccepted ? 'pending_acceptance' : 'accepted',
-          updatedAt: new Date().toISOString(),
-        };
-      } else {
-        // Inbound trade acceptance
-        updatedTrade = {
-          ...trade,
-          receiverAccepted: true,
-          status: trade.offererAccepted ? 'pending_acceptance' : 'accepted',
-          updatedAt: new Date().toISOString(),
-        };
-      }
+      // Simple status update - let the backend handle the logic
+      const updatedTrade = {
+        ...trade,
+        status: 'accepted' as const,
+        updatedAt: new Date().toISOString(),
+      };
       
       await updateTrade(updatedTrade);
       onClose();

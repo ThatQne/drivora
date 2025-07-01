@@ -302,31 +302,30 @@ router.post('/', auth, async (req, res) => {
     });
 
     await trade.save();
+    
+    // Populate the new trade for response
+    await trade.populate([
+      { path: 'offererUserId', select: 'username email avatar rating reviewCount' },
+      { path: 'receiverUserId', select: 'username email avatar rating reviewCount' },
+      { path: 'listingId' },
+      { path: 'offererVehicleIds' },
+    ]);
 
-    // Return the trade with minimal population for better performance
-    const populatedTrade = await Trade.findById(trade._id)
-      .populate('offererUserId', 'username email')
-      .populate('receiverUserId', 'username email')
-      .lean();
-
-    // Convert _id to id for frontend compatibility
-    const tradeWithId = {
-      ...populatedTrade,
-      id: populatedTrade._id.toString(),
-      _id: undefined
-    };
-
-    // 🔗 WEBSOCKET: Broadcast new trade to involved users
+    // 🔗 WEBSOCKET: Broadcast trade creation to both users
     if (req.app.locals.webSocket) {
-      // Notify the receiver of the new trade offer
-      req.app.locals.webSocket.broadcastToUser(receiverUserId, {
+      const socket = req.app.locals.webSocket;
+      socket.broadcastToUser(trade.offererUserId._id.toString(), {
         type: 'TRADE_CREATED',
-        data: tradeWithId,
-        timestamp: new Date().toISOString()
+        data: trade
       });
+      socket.broadcastToUser(trade.receiverUserId._id.toString(), {
+        type: 'TRADE_CREATED',
+        data: trade
+      });
+      console.log(`🔗 Broadcasted TRADE_CREATED to ${trade.offererUserId._id} and ${trade.receiverUserId._id}`);
     }
 
-    res.status(201).json(tradeWithId);
+    res.status(201).json(trade);
   } catch (error) {
     console.error('Error creating trade:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -403,12 +402,40 @@ router.put('/:id', auth, async (req, res) => {
     // For accept/reject, only the receiver can do these actions (but both can counter)
     if (['accepted', 'rejected'].includes(status)) {
       console.log(`🔍 Checking accept/reject permissions`);
-      if (trade.receiverUserId.toString() !== req.user.id) {
-        console.log(`❌ Only receiver can accept/reject`);
+
+      let isAllowed = false;
+
+      // Scenario 1: Accepting/rejecting the initial offer. Only the receiver can do this.
+      if (trade.status === 'pending' && trade.receiverUserId.toString() === req.user.id) {
+        console.log('✅ Allowing action: User is receiver of a pending trade.');
+        isAllowed = true;
+      }
+      
+      // Scenario 2: Accepting/rejecting a counter-offer.
+      if (trade.status === 'countered') {
+        // The user taking action should NOT be the one who last countered.
+        if (trade.lastCounteredBy) {
+          // If lastCounteredBy is set, only allow the other party to accept/reject
+          if (trade.lastCounteredBy.toString() !== req.user.id) {
+            console.log('✅ Allowing action: User is recipient of a counter-offer.');
+            isAllowed = true;
+          } else {
+            console.log(`❌ User ${req.user.id} is the same as lastCounteredBy ${trade.lastCounteredBy}`);
+          }
+        } else {
+          // If lastCounteredBy is not set (legacy trade), allow both parties to accept/reject
+          console.log('⚠️ Legacy trade without lastCounteredBy - allowing both parties to accept/reject');
+          isAllowed = true;
+        }
+      }
+
+      if (!isAllowed) {
+        console.log(`❌ Permission denied for user ${req.user.id} to ${status} trade ${trade._id} with status ${trade.status}`);
         return res.status(403).json({ 
-          message: 'Only the receiver can accept or reject a trade' 
+          message: 'It is not your turn to accept or reject this trade.' 
         });
       }
+
       console.log(`✅ Accept/reject permission granted`);
     }
 
@@ -505,6 +532,7 @@ router.put('/:id', auth, async (req, res) => {
       }
 
       trade.counterMessage = counterMessage;
+      trade.lastCounteredBy = req.user.id; // Set who made the last counter
       console.log(`✅ Counter offer processing complete`);
     }
 
@@ -678,17 +706,18 @@ router.put('/:id', auth, async (req, res) => {
       _id: undefined
     };
 
-    // 🔗 WEBSOCKET: Broadcast trade update to both parties
+    // 🔗 WEBSOCKET: Broadcast trade update to both users
     if (req.app.locals.webSocket) {
-      const message = {
-        type: status === 'completed' ? 'TRADE_COMPLETED' : 'TRADE_UPDATED',
-        data: tradeWithId,
-        timestamp: new Date().toISOString()
-      };
-
-      // Notify both offerer and receiver
-      req.app.locals.webSocket.broadcastToUser(trade.offererUserId.toString(), message);
-      req.app.locals.webSocket.broadcastToUser(trade.receiverUserId.toString(), message);
+      const socket = req.app.locals.webSocket;
+      socket.broadcastToUser(trade.offererUserId._id.toString(), {
+        type: 'TRADE_UPDATED',
+        data: trade
+      });
+      socket.broadcastToUser(trade.receiverUserId._id.toString(), {
+        type: 'TRADE_UPDATED',
+        data: trade
+      });
+      console.log(`🔗 Broadcasted TRADE_UPDATED to ${trade.offererUserId._id} and ${trade.receiverUserId._id}`);
     }
 
     console.log(`📤 Sending response with trade ID: ${tradeWithId.id}`);
