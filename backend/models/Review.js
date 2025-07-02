@@ -14,7 +14,7 @@ const reviewSchema = new mongoose.Schema({
   tradeId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Trade',
-    required: true
+    required: false // Made optional since reviews are now per-user, not per-trade
   },
   rating: {
     type: Number,
@@ -31,7 +31,17 @@ const reviewSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
   }
+});
+
+// Update the updatedAt field before saving
+reviewSchema.pre('save', function(next) {
+  this.updatedAt = new Date();
+  next();
 });
 
 // Indexes for better performance
@@ -40,7 +50,7 @@ reviewSchema.index({ reviewerId: 1 });
 reviewSchema.index({ tradeId: 1 });
 reviewSchema.index({ createdAt: -1 });
 
-// Compound index to prevent duplicate reviews
-reviewSchema.index({ reviewerId: 1, revieweeId: 1, tradeId: 1 }, { unique: true });
+// NEW: Compound index to allow only one review per reviewer for each reviewee
+reviewSchema.index({ reviewerId: 1, revieweeId: 1 }, { unique: true });
 
 module.exports = mongoose.model('Review', reviewSchema); 

@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext.tsx';
 import { Listing, Auction, Review, Sale, Vehicle, User as UserType } from '../../types/index.ts';
+import { ReviewModal } from './ReviewModal.tsx';
 
 interface SellerProfileViewProps {
   sellerId: string;
@@ -31,6 +32,7 @@ export function SellerProfileView({ sellerId, onBack, onListingClick, source }: 
   const { state, getUserProfile, loadUserReviews } = useApp();
   const [activeTab, setActiveTab] = useState<'listings' | 'auctions' | 'reviews' | 'sales'>('listings');
   const [loading, setLoading] = useState(true);
+  const [showReviewModal, setShowReviewModal] = useState(false);
   
   // Memoize seller lookup to prevent re-renders
   const seller = useMemo(() => {
@@ -329,7 +331,10 @@ export function SellerProfileView({ sellerId, onBack, onListingClick, source }: 
         </div>
       ) : (
         sellerReviews.map((review) => {
-          const reviewer = state.users.find(u => u.id === review.reviewerId);
+          // Use the populated reviewer object from the API response
+          const reviewer = review.reviewer || state.users.find(u => u.id === review.reviewerId);
+          const displayName = reviewer?.username || reviewer?.firstName || 'Anonymous User';
+          
           return (
             <motion.div
               key={review.id}
@@ -342,7 +347,7 @@ export function SellerProfileView({ sellerId, onBack, onListingClick, source }: 
                   {reviewer?.avatar ? (
                     <img
                       src={reviewer.avatar}
-                      alt={reviewer.username}
+                      alt={displayName}
                       className="w-full h-full object-cover rounded-full"
                     />
                   ) : (
@@ -352,16 +357,21 @@ export function SellerProfileView({ sellerId, onBack, onListingClick, source }: 
                 <div className="flex-1">
                   <div className="flex items-center space-x-2 mb-2">
                     <span className="font-medium text-primary-200">
-                      {reviewer?.username || 'Unknown User'}
+                      @{displayName}
                     </span>
                     {renderStars(review.rating)}
                     <span className="text-xs text-primary-400">
-                      {formatTimeAgo(review.createdAt)}
+                      {formatTimeAgo(review.updatedAt || review.createdAt)}
                     </span>
+                    {review.updatedAt && review.updatedAt !== review.createdAt && (
+                      <span className="text-xs text-blue-400">(edited)</span>
+                    )}
                   </div>
-                  <p className="text-primary-300 text-sm leading-relaxed">
-                    {review.comment}
-                  </p>
+                  {review.comment && (
+                    <p className="text-primary-300 text-sm leading-relaxed">
+                      {review.comment}
+                    </p>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -489,6 +499,19 @@ export function SellerProfileView({ sellerId, onBack, onListingClick, source }: 
           </div>
         </div>
 
+        {/* Action Buttons */}
+        {state.currentUser && state.currentUser.id !== sellerId && (
+          <div className="mt-4 flex space-x-3">
+            <button
+              onClick={() => setShowReviewModal(true)}
+              className="btn-primary flex items-center space-x-2"
+            >
+              <Star className="w-4 h-4" />
+              <span>Leave Review</span>
+            </button>
+          </div>
+        )}
+
         {/* Stats */}
         <div className="mt-6 pt-6 border-t border-primary-700/30">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -560,6 +583,16 @@ export function SellerProfileView({ sellerId, onBack, onListingClick, source }: 
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {/* Review Modal */}
+      <AnimatePresence>
+        {showReviewModal && (
+          <ReviewModal
+            revieweeUser={seller}
+            onClose={() => setShowReviewModal(false)}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 } 

@@ -316,11 +316,23 @@ class ApiService {
     return this.request<Review[]>(`/reviews/user/${userId}`);
   }
 
-  static async createReview(reviewData: Omit<Review, 'id' | 'createdAt'>): Promise<Review> {
+  static async createReview(reviewData: Omit<Review, 'id' | 'createdAt' | 'updatedAt'>): Promise<Review> {
     return this.request<Review>('/reviews', {
       method: 'POST',
       body: JSON.stringify(reviewData)
     });
+  }
+
+  static async getExistingReview(targetUserId: string): Promise<Review | null> {
+    try {
+      return await this.request<Review>(`/reviews/between/${targetUserId}`);
+    } catch (error) {
+      // Return null if no review exists (404)
+      if ((error as any)?.status === 404) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   // Trades

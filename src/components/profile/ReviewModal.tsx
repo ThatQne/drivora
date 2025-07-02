@@ -1,20 +1,43 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { X, Circle, Send } from 'lucide-react';
+import { X, Circle, Send, Edit } from 'lucide-react';
 import { useApp } from '../../context/AppContext.tsx';
-import { User, Trade } from '../../types/index.ts';
+import { User, Trade, Review } from '../../types/index.ts';
 
 interface ReviewModalProps {
-  trade: Trade;
+  trade?: Trade;
   revieweeUser: User;
   onClose: () => void;
 }
 
 export function ReviewModal({ trade, revieweeUser, onClose }: ReviewModalProps) {
-  const { state, submitReview } = useApp();
+  const { state, submitReview, getExistingReview } = useApp();
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
   const [loading, setLoading] = useState(false);
+  const [existingReview, setExistingReview] = useState<Review | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+
+  // Load existing review when modal opens
+  useEffect(() => {
+    const loadExistingReview = async () => {
+      if (!state.currentUser) return;
+      
+      try {
+        const review = await getExistingReview(revieweeUser.id);
+        if (review) {
+          setExistingReview(review);
+          setRating(review.rating);
+          setComment(review.comment || '');
+          setIsEditing(true);
+        }
+      } catch (error) {
+        console.error('Error loading existing review:', error);
+      }
+    };
+
+    loadExistingReview();
+  }, [revieweeUser.id, state.currentUser, getExistingReview]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,9 +48,9 @@ export function ReviewModal({ trade, revieweeUser, onClose }: ReviewModalProps) 
       await submitReview({
         reviewerId: state.currentUser.id,
         revieweeId: revieweeUser.id,
-        tradeId: trade.id,
+        tradeId: trade?.id, // Optional trade reference
         rating,
-        comment: comment.trim() || undefined
+        comment: comment.trim() || ''
       });
       onClose();
     } catch (error) {
@@ -52,7 +75,12 @@ export function ReviewModal({ trade, revieweeUser, onClose }: ReviewModalProps) 
         className="glass-effect rounded-2xl p-6 w-full max-w-md"
       >
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-primary-100">Leave a Review</h2>
+          <div className="flex items-center space-x-2">
+            <h2 className="text-xl font-bold text-primary-100">
+              {isEditing ? 'Edit Review' : 'Leave a Review'}
+            </h2>
+            {isEditing && <Edit className="w-5 h-5 text-blue-400" />}
+          </div>
           <button
             onClick={onClose}
             className="p-2 hover:bg-primary-800/50 rounded-full transition-colors"
@@ -78,7 +106,14 @@ export function ReviewModal({ trade, revieweeUser, onClose }: ReviewModalProps) 
             )}
             <div>
               <p className="text-primary-100 font-medium">@{revieweeUser.username}</p>
-              <p className="text-primary-400 text-sm">Trade completed successfully</p>
+              <p className="text-primary-400 text-sm">
+                {isEditing ? 'Updating your review' : 'Leave a review for this user'}
+              </p>
+              {existingReview && (
+                <p className="text-primary-500 text-xs mt-1">
+                  Last reviewed: {new Date(existingReview.updatedAt || existingReview.createdAt).toLocaleDateString()}
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -129,8 +164,13 @@ export function ReviewModal({ trade, revieweeUser, onClose }: ReviewModalProps) 
               disabled={loading}
               className="flex-1 btn-primary flex items-center justify-center space-x-2"
             >
-              <Send className="w-4 h-4" />
-              <span>{loading ? 'Submitting...' : 'Submit Review'}</span>
+              {isEditing ? <Edit className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+              <span>
+                {loading 
+                  ? (isEditing ? 'Updating...' : 'Submitting...') 
+                  : (isEditing ? 'Update Review' : 'Submit Review')
+                }
+              </span>
             </button>
           </div>
         </form>

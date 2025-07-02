@@ -213,6 +213,10 @@ export interface Review {
   rating: number; // 1-5 stars
   comment: string;
   createdAt: string;
+  updatedAt?: string;
+  reviewer?: User; // Populated reviewer object
+  reviewee?: User; // Populated reviewee object
+  isUpdate?: boolean; // Flag indicating if this was an update operation
 }
 
 export interface Sale {

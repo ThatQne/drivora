@@ -103,6 +103,7 @@ interface AppContextType {
   showTradeNotification: (trade: Trade, otherUser: User) => void;
   searchUsers: (query: string) => Promise<void>;
   loadUserReviews: (userId: string) => Promise<void>;
+  getExistingReview: (targetUserId: string) => Promise<Review | null>;
 }
 
 type AppAction = 
@@ -1645,12 +1646,35 @@ export function AppProvider({ children }: AppProviderProps) {
     }
   };
 
-  const submitReview = async (reviewData: Omit<Review, 'id' | 'createdAt'>) => {
+  const submitReview = async (reviewData: Omit<Review, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
       const response = await ApiService.createReview(reviewData);
+      
+      // Update the reviews in state if we have them loaded
+      if (state.reviews.length > 0) {
+        const existingReviewIndex = state.reviews.findIndex(r => 
+          r.reviewerId === reviewData.reviewerId && r.revieweeId === reviewData.revieweeId
+        );
+        
+        if (existingReviewIndex >= 0) {
+          // Update existing review
+          const updatedReviews = [...state.reviews];
+          updatedReviews[existingReviewIndex] = response;
+          dispatch({ type: 'SET_REVIEWS', payload: updatedReviews });
+        } else {
+          // Add new review
+          dispatch({ type: 'ADD_REVIEWS', payload: [response] });
+        }
+      }
+      
       // Reload all data to update ratings
       await loadAllListings();
-      showSuccess('Review Submitted', 'Thank you for your feedback!');
+      
+      const isUpdate = response.isUpdate;
+      showSuccess(
+        isUpdate ? 'Review Updated' : 'Review Submitted', 
+        isUpdate ? 'Your review has been updated successfully!' : 'Thank you for your feedback!'
+      );
     } catch (error) {
       console.error('Error submitting review:', error);
       showError('Review Failed', 'Unable to submit your review. Please try again.');
@@ -2349,6 +2373,15 @@ export function AppProvider({ children }: AppProviderProps) {
     }
   }, [dispatch]);
 
+  const getExistingReview = useCallback(async (targetUserId: string): Promise<Review | null> => {
+    try {
+      return await ApiService.getExistingReview(targetUserId);
+    } catch (error) {
+      console.error(`Failed to get existing review for user ${targetUserId}:`, error);
+      return null;
+    }
+  }, []);
+
   // Memoize the context value to prevent unnecessary re-renders
   const contextValue = useMemo(() => ({
     state,
@@ -2553,6 +2586,7 @@ export function AppProvider({ children }: AppProviderProps) {
     loadAllUsers,
     searchUsers,
     loadUserReviews,
+    getExistingReview,
   }), [state, dispatch, login, logout, updateUser, addVehicle, updateVehicle, deleteVehicle, addListing, updateListing, deleteListing, renewListing, incrementListingViews, loadAllListings, addReview, getUserProfile, sendMessage, markMessagesAsRead, addTrade, updateTrade, deleteTrade, cleanupCorruptedTrades, cleanupVehicleFlags, activeTab, setActiveTab, activeConversation, setActiveConversation, reloadTrades, loadUserMessages, loadMessagesOnTabSwitch, checkForNewMessages, addNotification, removeNotification, markNotificationRead, clearAllNotifications, showSuccess, showError, showWarning, showInfo, showMessageNotification, showTradeNotification, loadAllUsers, searchUsers, loadUserReviews]);
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>;
