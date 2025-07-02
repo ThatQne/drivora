@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useApp } from '../../context/AppContext.tsx';
 import { User } from '../../types/index.ts';
 import { Search, User as UserIcon, Star, MessageSquare, Wind } from 'lucide-react';
 import { SellerProfileView } from '../profile/SellerProfileView.tsx';
-import { debounce } from 'lodash';
 
 export function UserSearchView() {
   const { state, searchUsers } = useApp();
@@ -12,32 +11,37 @@ export function UserSearchView() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Debounced search function
-  const debouncedSearch = useCallback(
-    debounce((query: string) => {
-      setIsLoading(true);
-      searchUsers(query).finally(() => setIsLoading(false));
-    }, 300), // 300ms delay
-    [searchUsers]
-  );
-
   useEffect(() => {
-    // Clear users when the component unmounts or search term is empty
+    // When search term changes, run this effect
+    if (searchTerm.length > 0 && searchTerm.length < 2) {
+      // Don't search, but don't clear results immediately to allow typing
+      return;
+    }
+    
+    // Immediately set loading state when user starts typing a valid search
+    if (searchTerm.length >= 2) {
+      setIsLoading(true);
+    }
+
+    const delayDebounceFn = setTimeout(() => {
+      searchUsers(searchTerm).finally(() => {
+        setIsLoading(false);
+      });
+    }, 300); // 300ms delay for debouncing
+
+    // Cleanup function to cancel the timeout if user keeps typing
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchTerm, searchUsers]);
+
+  // Effect to clear users when the component unmounts
+  useEffect(() => {
     return () => {
-      searchUsers(''); // This will clear the users array based on the new logic
+      searchUsers('');
     };
   }, [searchUsers]);
   
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const query = e.target.value;
-    setSearchTerm(query);
-    if (query.length === 0) {
-      // Immediately clear results if search is cleared
-      searchUsers('');
-      setIsLoading(false);
-    } else if (query.length >= 2) {
-      debouncedSearch(query);
-    }
+    setSearchTerm(e.target.value);
   };
 
   const handleUserClick = (user: User) => {
@@ -54,32 +58,13 @@ export function UserSearchView() {
     );
   }
 
-  return (
-    <div className="container mx-auto p-4 lg:p-6">
-      <motion.div
-        initial={{ y: -20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.5 }}
-      >
-        <h1 className="text-3xl font-bold text-primary-100 mb-2">User Directory</h1>
-        <p className="text-primary-300 mb-6">Search for users by username, first name, or last name.</p>
-        
-        <div className="relative mb-8">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-primary-400" />
-          <input
-            type="text"
-            placeholder="Start typing to search for users (min. 2 chars)..."
-            value={searchTerm}
-            onChange={handleSearchChange}
-            className="input-field w-full pl-12 pr-4 py-3"
-          />
-        </div>
-      </motion.div>
+  const renderContent = () => {
+    if (isLoading) {
+      return <div className="text-center text-primary-300">Searching...</div>;
+    }
 
-      {/* User Grid or Initial Prompt */}
-      {isLoading ? (
-        <div className="text-center text-primary-300">Searching...</div>
-      ) : searchTerm.length < 2 ? (
+    if (searchTerm.length < 2) {
+      return (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -91,7 +76,11 @@ export function UserSearchView() {
             Enter at least 2 characters in the search bar above to find users.
           </p>
         </motion.div>
-      ) : state.users.length > 0 ? (
+      );
+    }
+
+    if (state.users.length > 0) {
+      return (
         <motion.div
           className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"
           initial={{ opacity: 0 }}
@@ -136,17 +125,45 @@ export function UserSearchView() {
             </motion.div>
           ))}
         </motion.div>
-      ) : (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-center py-16"
-        >
-          <Search className="w-16 h-16 text-primary-500 mx-auto mb-4" />
-          <h3 className="text-xl font-semibold text-primary-200">No users found</h3>
-          <p className="text-primary-400">Try a different search term.</p>
-        </motion.div>
-      )}
+      );
+    }
+
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="text-center py-16"
+      >
+        <Search className="w-16 h-16 text-primary-500 mx-auto mb-4" />
+        <h3 className="text-xl font-semibold text-primary-200">No users found</h3>
+        <p className="text-primary-400">Try a different search term.</p>
+      </motion.div>
+    );
+  };
+
+  return (
+    <div className="container mx-auto p-4 lg:p-6">
+      <motion.div
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.5 }}
+      >
+        <h1 className="text-3xl font-bold text-primary-100 mb-2">User Directory</h1>
+        <p className="text-primary-300 mb-6">Search for users by username, first name, or last name.</p>
+        
+        <div className="relative mb-8">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-primary-400" />
+          <input
+            type="text"
+            placeholder="Start typing to search for users (min. 2 chars)..."
+            value={searchTerm}
+            onChange={handleSearchChange}
+            className="input-field w-full pl-12 pr-4 py-3"
+          />
+        </div>
+      </motion.div>
+
+      {renderContent()}
     </div>
   );
 } 

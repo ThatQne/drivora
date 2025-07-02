@@ -118,10 +118,10 @@ export function TradeDetailModal({ trade, isOutbound, onClose, onCounterOffer }:
     try {
       // Simple status update - let the backend handle the logic
       const updatedTrade = {
-        ...trade,
+          ...trade,
         status: 'accepted' as const,
-        updatedAt: new Date().toISOString(),
-      };
+          updatedAt: new Date().toISOString(),
+        };
       
       await updateTrade(updatedTrade);
       onClose();

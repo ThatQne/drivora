@@ -203,8 +203,8 @@ listingSchema.pre('save', async function(next) {
         newValue: this.title,
         changedAt: new Date()
       });
-    }
-    
+  }
+  
     if (this.isModified('description') && original.description !== this.description) {
       this.history.push({
         type: 'description_update',
@@ -244,7 +244,7 @@ listingSchema.pre('save', async function(next) {
     // Update lastEditedAt if any field was modified
     const modifiedPaths = this.modifiedPaths();
     if (modifiedPaths.length > 0) {
-      this.lastEditedAt = new Date();
+    this.lastEditedAt = new Date();
     }
   }
   

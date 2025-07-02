@@ -102,6 +102,7 @@ interface AppContextType {
   showMessageNotification: (message: Message, sender: User) => void;
   showTradeNotification: (trade: Trade, otherUser: User) => void;
   searchUsers: (query: string) => Promise<void>;
+  loadUserReviews: (userId: string) => Promise<void>;
 }
 
 type AppAction = 
@@ -127,13 +128,15 @@ type AppAction =
   | { type: 'UPDATE_CONVERSATION'; payload: { conversationId: string; lastMessage: Message; updatedAt: string } }
   | { type: 'SET_CONVERSATIONS'; payload: Conversation[] }
   | { type: 'SET_REVIEWS'; payload: Review[] }
+  | { type: 'ADD_REVIEWS'; payload: Review[] }
   | { type: 'SET_USERS'; payload: User[] }
   | { type: 'SET_ACTIVE_TAB'; payload: NavigationTab }
   | { type: 'ADD_NOTIFICATION'; payload: Notification }
   | { type: 'REMOVE_NOTIFICATION'; payload: string }
   | { type: 'MARK_NOTIFICATION_READ'; payload: string }
   | { type: 'CLEAR_ALL_NOTIFICATIONS' }
-  | { type: 'UPDATE_USER_STATE'; payload: User };
+  | { type: 'UPDATE_USER_STATE'; payload: User }
+  | { type: 'ADD_REVIEWS'; payload: Review[] };
 
 const initialState: AppState = {
   currentUser: null,
@@ -430,7 +433,16 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, conversations: action.payload };
     case 'SET_REVIEWS':
       return { ...state, reviews: action.payload };
+    case 'ADD_REVIEWS':
+      // Add new reviews to state, replacing any existing ones for the same review ID to avoid duplicates.
+      const existingReviewIds = new Set(state.reviews.map(r => r.id));
+      const newReviews = action.payload.filter(r => !existingReviewIds.has(r.id));
+      return {
+        ...state,
+        reviews: [...state.reviews, ...newReviews]
+      };
     case 'SET_USERS':
+      console.log('Dispatching SET_USERS, received:', action.payload.length, 'users. Current state has:', state.users.length);
       return { ...state, users: action.payload };
     case 'SET_ALL_LISTINGS':
       console.log('🔄 SET_ALL_LISTINGS reducer - current count:', state.allListings.length, 'new count:', action.payload.length);
@@ -465,6 +477,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
       };
     case 'UPDATE_USER_STATE':
       return updateUserInStateAndStorage(state, action.payload);
+    case 'ADD_REVIEWS':
+      return { ...state, reviews: [...state.reviews, ...action.payload] };
     default:
       return state;
   }
@@ -715,19 +729,38 @@ export function AppProvider({ children }: AppProviderProps) {
             // Update trade
             dispatch({ type: 'UPDATE_TRADE', payload: tradeWithId });
             
-            // If current user was involved, reload garage to show new cars
-            if (trade.offererUserId === stateRef.current.currentUser?.id || trade.receiverUserId === stateRef.current.currentUser?.id) {
+            // If current user was involved, immediately reload garage to show vehicle ownership changes
+            const currentUserId = stateRef.current.currentUser?.id;
+            const offererUserId = typeof trade.offererUserId === 'string' ? trade.offererUserId : trade.offererUserId?.id || trade.offererUserId?._id;
+            const receiverUserId = typeof trade.receiverUserId === 'string' ? trade.receiverUserId : trade.receiverUserId?.id || trade.receiverUserId?._id;
+            
+            if (currentUserId && (offererUserId === currentUserId || receiverUserId === currentUserId)) {
               console.log('🚗 Reloading garage after trade completion...');
-              setTimeout(async () => {
+              
+              // Reload user's vehicles immediately to reflect ownership changes
+              const reloadVehicles = async () => {
                 try {
                   const vehicles = await ApiService.getUserVehicles();
                   const vehiclesWithId = vehicles.map((v: any) => ({ ...v, id: v._id || v.id }));
                   dispatch({ type: 'SET_VEHICLES', payload: vehiclesWithId });
-                  console.log('✅ Garage updated with new cars from trade');
+                  console.log('✅ Garage updated with new vehicle ownership from completed trade');
+                  
+                  // Also reload all listings to remove traded vehicles from marketplace
+                  const listingsResponse = await ApiService.getAllListings();
+                  const listingsWithId = listingsResponse.listings.map((listing: any) => ({ ...listing, id: listing._id || listing.id }));
+                  dispatch({ type: 'SET_ALL_LISTINGS', payload: listingsWithId });
+                  console.log('✅ Marketplace updated after trade completion');
+                  
+                  // Show success notification
+                  showSuccess('Trade Completed!', 'Vehicle ownership has been transferred successfully.');
                 } catch (error) {
-                  console.error('❌ Error reloading garage after trade:', error);
+                  console.error('❌ Error reloading data after trade completion:', error);
+                  showError('Update Failed', 'Could not refresh your garage after trade completion. Please refresh the page.');
                 }
-              }, 1000); // Small delay to ensure backend processing is complete
+              };
+              
+              // Small delay to ensure backend processing is complete
+              setTimeout(reloadVehicles, 500);
             }
           },
 
@@ -1494,7 +1527,7 @@ export function AppProvider({ children }: AppProviderProps) {
         dispatch({ type: 'SET_ALL_LISTINGS', payload: updatedAllListings });
         console.log('📋 Listing updated in marketplace');
       }
-
+      
       // 🚗 SMART UPDATE: Update vehicle listing status
       const vehicle = state.vehicles.find(v => v.id === listing.vehicleId);
       if (vehicle) {
@@ -2139,11 +2172,11 @@ export function AppProvider({ children }: AppProviderProps) {
 
   const cleanupCorruptedTrades = async () => {
     console.log('🧹 Attempting to clean up corrupted trades...');
-    const result = await ApiService.cleanupCorruptedTrades();
+      const result = await ApiService.cleanupCorruptedTrades();
     console.log(`✅ Corrupted trades cleanup result:`, result);
     // Optionally, reload trades after cleanup
     await reloadTrades();
-    return result;
+      return result;
   };
 
   const cleanupVehicleFlags = async () => {
@@ -2298,6 +2331,21 @@ export function AppProvider({ children }: AppProviderProps) {
       dispatch({ type: 'SET_ERROR', payload: 'Failed to search users.' });
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  }, [dispatch]);
+
+  const loadUserReviews = useCallback(async (userId: string) => {
+    try {
+      const reviews = await ApiService.getUserReviews(userId);
+      const normalizedReviews = reviews.map((review: any) => ({
+        ...review,
+        id: review._id,
+      }));
+      // We need a new dispatch action to add these reviews to the existing state
+      // without overwriting reviews for other users.
+      dispatch({ type: 'ADD_REVIEWS', payload: normalizedReviews });
+    } catch (error) {
+      console.error(`Failed to load reviews for user ${userId}:`, error);
     }
   }, [dispatch]);
 
@@ -2504,7 +2552,8 @@ export function AppProvider({ children }: AppProviderProps) {
     showTradeNotification,
     loadAllUsers,
     searchUsers,
-  }), [state, dispatch, login, logout, updateUser, addVehicle, updateVehicle, deleteVehicle, addListing, updateListing, deleteListing, renewListing, incrementListingViews, loadAllListings, addReview, getUserProfile, sendMessage, markMessagesAsRead, addTrade, updateTrade, deleteTrade, cleanupCorruptedTrades, cleanupVehicleFlags, activeTab, setActiveTab, activeConversation, setActiveConversation, reloadTrades, loadUserMessages, loadMessagesOnTabSwitch, checkForNewMessages, addNotification, removeNotification, markNotificationRead, clearAllNotifications, showSuccess, showError, showWarning, showInfo, showMessageNotification, showTradeNotification, loadAllUsers, searchUsers]);
+    loadUserReviews,
+  }), [state, dispatch, login, logout, updateUser, addVehicle, updateVehicle, deleteVehicle, addListing, updateListing, deleteListing, renewListing, incrementListingViews, loadAllListings, addReview, getUserProfile, sendMessage, markMessagesAsRead, addTrade, updateTrade, deleteTrade, cleanupCorruptedTrades, cleanupVehicleFlags, activeTab, setActiveTab, activeConversation, setActiveConversation, reloadTrades, loadUserMessages, loadMessagesOnTabSwitch, checkForNewMessages, addNotification, removeNotification, markNotificationRead, clearAllNotifications, showSuccess, showError, showWarning, showInfo, showMessageNotification, showTradeNotification, loadAllUsers, searchUsers, loadUserReviews]);
 
   return <AppContext.Provider value={contextValue}>{children}</AppContext.Provider>;
 }

@@ -35,12 +35,12 @@ export function TradesView() {
     const loadTradesAndListings = async () => {
       console.log('🔄 TradesView mounted, reloading trades to trigger cleanup...');
       try {
-        await reloadTrades();
+      await reloadTrades();
         // Removed the info notification to prevent spam
         showInfo('Trades Updated', 'Refreshed your trade offers');
-        // Also ensure we have listing data
-        if (state.allListings.length === 0) {
-          await loadAllListings();
+      // Also ensure we have listing data
+      if (state.allListings.length === 0) {
+        await loadAllListings();
         }
       } catch (error) {
         showError('Failed to Load Trades', 'Unable to refresh trade data');

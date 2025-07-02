@@ -256,11 +256,11 @@ export function ListingDetailView({ listing, vehicle, seller, onClose, onContact
 
                 <div className="col-span-2 flex items-center justify-between">
                   <div className="flex items-center space-x-2">
-                    <Car className="w-5 h-5 text-primary-400" />
-                    <div>
-                      <p className="text-sm text-primary-400">VIN</p>
-                      <p className="font-medium text-primary-200 font-mono">{vehicle.vin}</p>
-                    </div>
+                  <Car className="w-5 h-5 text-primary-400" />
+                  <div>
+                    <p className="text-sm text-primary-400">VIN</p>
+                    <p className="font-medium text-primary-200 font-mono">{vehicle.vin}</p>
+                  </div>
                   </div>
                   <motion.button
                     whileHover={{ scale: 1.05 }}
@@ -421,7 +421,7 @@ export function ListingDetailView({ listing, vehicle, seller, onClose, onContact
 
             {/* Listing History */}
             {listing.history && listing.history.length > 0 && (
-              <div className="glass-effect rounded-xl p-4">
+            <div className="glass-effect rounded-xl p-4">
                 <h3 className="text-lg font-semibold text-primary-100 mb-3">Listing History</h3>
                 <div className="space-y-2">
                   {listing.history.slice().reverse().map((historyEntry, index) => {
@@ -469,11 +469,11 @@ export function ListingDetailView({ listing, vehicle, seller, onClose, onContact
                           <span className="text-xs text-primary-400">
                             {displayValue}
                           </span>
-                        </div>
+                  </div>
                         <span className="text-xs text-primary-400">
                           {index === 0 ? 'Latest' : formatTimeAgo(historyEntry.changedAt)}
                         </span>
-                      </div>
+                  </div>
                     );
                   })}
                 </div>

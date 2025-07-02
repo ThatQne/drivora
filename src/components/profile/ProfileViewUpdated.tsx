@@ -88,7 +88,7 @@ export function ProfileViewUpdated() {
       setProfileData(prev => ({ ...prev, avatar: uploadResponse.url }));
 
       if (state.currentUser) {
-        const savedUser = await ApiService.updateUserProfile({ avatar: uploadResponse.url });
+          const savedUser = await ApiService.updateUserProfile({ avatar: uploadResponse.url });
         updateUser(savedUser); // This now only updates context state
         showSuccess('Avatar Updated!', 'Your new profile picture has been saved.');
       }

@@ -310,7 +310,7 @@ router.post('/', auth, async (req, res) => {
     });
 
     await trade.save();
-    
+
     // Populate the new trade for response
     await trade.populate([
       { path: 'offererUserId', select: 'username email avatar rating reviewCount' },
@@ -319,18 +319,26 @@ router.post('/', auth, async (req, res) => {
       { path: 'offererVehicleIds' },
     ]);
 
-    // 🔗 WEBSOCKET: Broadcast trade creation to both users
+    // 🔗 WEBSOCKET: Broadcast trade creation to both users with full population
     if (req.app.locals.webSocket) {
       const socket = req.app.locals.webSocket;
+      
+      // Convert the already populated trade to proper format
+      const tradeWithId = {
+        ...trade.toObject(),
+        id: trade._id.toString(),
+        _id: undefined
+      };
+      
       socket.broadcastToUser(trade.offererUserId._id.toString(), {
         type: 'TRADE_CREATED',
-        data: trade
+        data: tradeWithId
       });
       socket.broadcastToUser(trade.receiverUserId._id.toString(), {
         type: 'TRADE_CREATED',
-        data: trade
+        data: tradeWithId
       });
-      console.log(`🔗 Broadcasted TRADE_CREATED to ${trade.offererUserId._id} and ${trade.receiverUserId._id}`);
+      console.log(`🔗 Broadcasted TRADE_CREATED with full population to ${trade.offererUserId._id} and ${trade.receiverUserId._id}`);
     }
 
     res.status(201).json(trade);
@@ -568,11 +576,17 @@ router.put('/:id', auth, async (req, res) => {
     if (status === 'accepted') {
       console.log(`🔄 Trade ${trade._id} accepted - removing vehicles from listings`);
       
-      // Get all vehicle IDs involved in the trade
+      // Get all vehicle IDs involved in the trade (including main listing vehicle)
       const allVehicleIds = [
         ...trade.offererVehicleIds,
         ...(trade.receiverVehicleIds || [])
       ];
+      
+      // Add the main listing vehicle ID
+      if (trade.listingData?.vehicleId) {
+        allVehicleIds.push(trade.listingData.vehicleId.toString());
+        console.log(`🔄 Added main listing vehicle ${trade.listingData.vehicleId} to trade processing`);
+      }
 
       if (allVehicleIds.length > 0) {
         // Deactivate listings for all involved vehicles (only if they are currently listed)
@@ -623,7 +637,24 @@ router.put('/:id', auth, async (req, res) => {
     if (status === 'completed') {
       console.log(`🔄 Completing trade ${trade._id} - transferring ownership`);
       
-      // Transfer vehicle ownership
+      // 🚗 CRITICAL FIX: Transfer the main listing vehicle to offerer
+      const listingVehicleId = trade.listingData?.vehicleId;
+      if (listingVehicleId) {
+        await Vehicle.updateOne(
+          { _id: listingVehicleId },
+          { 
+            ownerId: trade.offererUserId,
+            isListed: false,
+            isAuctioned: false,
+            listingId: null,
+            isInTrade: false,
+            tradeId: null
+          }
+        );
+        console.log(`🔄 ✅ MAIN VEHICLE TRANSFER: Transferred listing vehicle ${listingVehicleId} from receiver to offerer`);
+      }
+      
+      // Transfer offerer's vehicles to receiver
       if (trade.offererVehicleIds.length > 0) {
         await Vehicle.updateMany(
           { _id: { $in: trade.offererVehicleIds } },
@@ -639,6 +670,7 @@ router.put('/:id', auth, async (req, res) => {
         console.log(`🔄 Transferred ${trade.offererVehicleIds.length} vehicles from offerer to receiver`);
       }
 
+      // Transfer receiver's counter-offered vehicles to offerer (if any)
       if (trade.receiverVehicleIds && trade.receiverVehicleIds.length > 0) {
         await Vehicle.updateMany(
           { _id: { $in: trade.receiverVehicleIds } },
@@ -651,7 +683,7 @@ router.put('/:id', auth, async (req, res) => {
             tradeId: null
           }
         );
-        console.log(`🔄 Transferred ${trade.receiverVehicleIds.length} vehicles from receiver to offerer`);
+        console.log(`🔄 Transferred ${trade.receiverVehicleIds.length} counter-offered vehicles from receiver to offerer`);
       }
 
       // Mark the original listing as sold
@@ -668,6 +700,36 @@ router.put('/:id', auth, async (req, res) => {
       }
 
       trade.completedAt = new Date();
+      
+      // 🔗 WEBSOCKET: Send special TRADE_COMPLETED event to trigger vehicle reload
+      if (req.app.locals.webSocket) {
+        const socket = req.app.locals.webSocket;
+        
+        // Get fully populated trade for WebSocket broadcast
+        const completedTrade = await Trade.findById(trade._id)
+          .populate('offererUserId', 'username email avatar rating reviewCount')
+          .populate('receiverUserId', 'username email avatar rating reviewCount')
+          .populate('listingId')
+          .populate('offererVehicleIds')
+          .populate('receiverVehicleIds')
+          .lean();
+
+        const completedTradeWithId = {
+          ...completedTrade,
+          id: completedTrade._id.toString(),
+          _id: undefined
+        };
+        
+        socket.broadcastToUser(trade.offererUserId._id.toString(), {
+          type: 'TRADE_COMPLETED',
+          data: completedTradeWithId
+        });
+        socket.broadcastToUser(trade.receiverUserId._id.toString(), {
+          type: 'TRADE_COMPLETED',
+          data: completedTradeWithId
+        });
+        console.log(`🔗 Broadcasted TRADE_COMPLETED to ${trade.offererUserId._id} and ${trade.receiverUserId._id}`);
+      }
     }
 
     // If trade is cancelled, handle same as rejected (keep vehicles listed)
@@ -695,7 +757,7 @@ router.put('/:id', auth, async (req, res) => {
     // Handle declined trades - mark as declined and restore vehicle availability
     if (status === 'declined') {
       console.log(`🔄 Trade ${trade._id} declined - restoring vehicle availability`);
-      
+        
       // Get all vehicle IDs involved in the trade
       const allVehicleIds = [
         ...trade.offererVehicleIds,
@@ -737,7 +799,7 @@ router.put('/:id', auth, async (req, res) => {
           }
         );
         console.log(`🔄 Cleared trade flags from ${allVehicleIds.length} vehicles - they can now be relisted`);
-      }
+    }
     }
 
 
@@ -760,18 +822,34 @@ router.put('/:id', auth, async (req, res) => {
       _id: undefined
     };
 
-    // 🔗 WEBSOCKET: Broadcast trade update to both users
+    // 🔗 WEBSOCKET: Broadcast trade update to both users with full population
     if (req.app.locals.webSocket) {
       const socket = req.app.locals.webSocket;
+      
+      // Get fully populated trade for WebSocket broadcast
+      const fullPopulatedTrade = await Trade.findById(trade._id)
+        .populate('offererUserId', 'username email avatar rating reviewCount')
+        .populate('receiverUserId', 'username email avatar rating reviewCount')
+        .populate('listingId')
+        .populate('offererVehicleIds')
+        .populate('receiverVehicleIds')
+        .lean();
+
+      const fullTradeWithId = {
+        ...fullPopulatedTrade,
+        id: fullPopulatedTrade._id.toString(),
+        _id: undefined
+      };
+      
       socket.broadcastToUser(trade.offererUserId._id.toString(), {
         type: 'TRADE_UPDATED',
-        data: trade
+        data: fullTradeWithId
       });
       socket.broadcastToUser(trade.receiverUserId._id.toString(), {
         type: 'TRADE_UPDATED',
-        data: trade
+        data: fullTradeWithId
       });
-      console.log(`🔗 Broadcasted TRADE_UPDATED to ${trade.offererUserId._id} and ${trade.receiverUserId._id}`);
+      console.log(`🔗 Broadcasted TRADE_UPDATED with full population to ${trade.offererUserId._id} and ${trade.receiverUserId._id}`);
     }
 
     console.log(`📤 Sending response with trade ID: ${tradeWithId.id}`);

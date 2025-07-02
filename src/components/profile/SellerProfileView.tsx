@@ -28,40 +28,40 @@ interface SellerProfileViewProps {
 }
 
 export function SellerProfileView({ sellerId, onBack, onListingClick, source }: SellerProfileViewProps) {
-  const { state, getUserProfile } = useApp();
+  const { state, getUserProfile, loadUserReviews } = useApp();
   const [activeTab, setActiveTab] = useState<'listings' | 'auctions' | 'reviews' | 'sales'>('listings');
   const [loading, setLoading] = useState(true);
   
   // Memoize seller lookup to prevent re-renders
   const seller = useMemo(() => {
-    console.log('SellerProfileView - sellerId:', sellerId);
-    console.log('SellerProfileView - available users:', state.users.map(u => ({ id: u.id, username: u.username })));
-    console.log('SellerProfileView - current user:', state.currentUser ? { id: state.currentUser.id, username: state.currentUser.username } : null);
-    
-    // Try multiple ways to find the seller
+  console.log('SellerProfileView - sellerId:', sellerId);
+  console.log('SellerProfileView - available users:', state.users.map(u => ({ id: u.id, username: u.username })));
+  console.log('SellerProfileView - current user:', state.currentUser ? { id: state.currentUser.id, username: state.currentUser.username } : null);
+  
+  // Try multiple ways to find the seller
     let foundSeller = getUserProfile(sellerId);
-    
-    // If not found, try to find in allListings populated seller data
+  
+  // If not found, try to find in allListings populated seller data
     if (!foundSeller) {
-      console.log('Seller not found in users, checking listings...');
-      const listingWithSeller = state.allListings.find(listing => {
-        const listingSellerId = typeof listing.sellerId === 'object' ? 
-          (listing.sellerId as any).id || (listing.sellerId as any)._id :
-          listing.sellerId;
-        return listingSellerId === sellerId;
-      });
-      
-      if (listingWithSeller && (listingWithSeller as any).seller) {
+    console.log('Seller not found in users, checking listings...');
+    const listingWithSeller = state.allListings.find(listing => {
+      const listingSellerId = typeof listing.sellerId === 'object' ? 
+        (listing.sellerId as any).id || (listing.sellerId as any)._id :
+        listing.sellerId;
+      return listingSellerId === sellerId;
+    });
+    
+    if (listingWithSeller && (listingWithSeller as any).seller) {
         foundSeller = (listingWithSeller as any).seller;
         console.log('Found seller in listing data:', foundSeller);
-      }
     }
-    
-    // If still not found and sellerId matches current user, use current user
+  }
+  
+  // If still not found and sellerId matches current user, use current user
     if (!foundSeller && state.currentUser && state.currentUser.id === sellerId) {
       foundSeller = state.currentUser;
-      console.log('Using current user as seller');
-    }
+    console.log('Using current user as seller');
+  }
     
     return foundSeller;
   }, [sellerId, state.users, state.currentUser, state.allListings, getUserProfile]);
@@ -125,10 +125,11 @@ export function SellerProfileView({ sellerId, onBack, onListingClick, source }: 
   }, [seller, sellerId, state.allListings, state.vehicles]);
 
   useEffect(() => {
-    // Simulate loading time
-    const timer = setTimeout(() => setLoading(false), 500);
-    return () => clearTimeout(timer);
-  }, []);
+    if (sellerId) {
+      setLoading(true);
+      loadUserReviews(sellerId).finally(() => setLoading(false));
+    }
+  }, [sellerId, loadUserReviews]);
 
   if (!seller) {
     return (
